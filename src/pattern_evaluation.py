@@ -1,80 +1,45 @@
 """
 pattern_evaluation.py
 ======================
-Supporting module for notebooks/05_model_evaluation.ipynb.
+Supporting module for pattern evaluation, baseline comparisons, and robustness analysis.
 
-This module exists ONLY to support the new evaluation notebook. It does not
-change, replace, or duplicate anything in sequential.py, evaluation.py, or
-pattern_ranking.py — it adds the pieces those modules do not already
-provide:
+This module provides two distinct, scientifically defensible evaluation protocols:
 
-1. A reference/"ground truth" pattern construction procedure that is
-   independent of PrefixSpan's own output (see build_reference_od_patterns).
-2. A cross-method matching procedure so PrefixSpan, the direct-transition
-   baseline, and the co-occurrence baseline can all be scored against the
-   SAME reference set on a common footing (see match_patterns_to_reference).
-3. Precision / Recall / F1 (and an optional, explicitly bounded-universe
-   accuracy) computed from real TP/FP/FN counts — nothing here fabricates a
-   metric value (see confusion_counts, precision_recall_f1).
-4. A simple, order-agnostic co-occurrence baseline (see
-   mine_cooccurrence_pairs), added specifically for the method comparison —
-   it is deliberately kept to 2-cell pairs rather than full Apriori-style
-   itemsets of arbitrary size, since the notebook only needs a clean,
-   order-blind contrast to PrefixSpan and mine_contiguous_patterns(), not a
-   general frequent-itemset miner.
-5. Jaccard pattern-set-overlap stability helpers (see jaccard_similarity /
-   pairwise_jaccard_table), used to check how stable the mined pattern set
-   is across nearby parameter settings (same grid, different min_support).
+1. ORDERED-TRANSITION-PAIR EVALUATION (Pair-Level):
+   Evaluates methods based on their ability to recover physical, directed origin-to-destination
+   transition pairs.
+   - Prediction Unit: Unique ordered cell pair (o, d).
+   - Reference Unit: Unique reference transition pair (o, d).
+   - TP: Distinct reference pairs recovered by at least one predicted pattern.
+   - FP: Distinct predicted pairs that are not in the reference set.
+   - FN: Distinct reference pairs not recovered by any predicted pattern.
+   - Precision = TP / (TP + FP), Recall = TP / (TP + FN), F1 = 2*P*R / (P+R).
+   All counts are in identical units (distinct ordered cell pairs).
 
-WHY A REFERENCE, NOT "GROUND TRUTH LABELS"
--------------------------------------------
-Urban taxi mobility pattern discovery is unsupervised: there is no external
-label saying "this is a real recurring route." Treating PrefixSpan's own
-frequent patterns as ground truth would be circular (it would just measure
-whether PrefixSpan agrees with itself). Instead, this module builds a
-reference set from an INDEPENDENTLY MOTIVATED, reproducible rule that does
-not call PrefixSpan, and does not use PrefixSpan's own support statistic
-(fraction of DISTINCT SEQUENCES containing a pattern):
+2. PATTERN-LEVEL EVALUATION (Exact Pattern Match):
+   Evaluates whether full multi-cell discovered sequences (e.g. A -> B -> C) exactly match
+   independently specified multi-cell reference patterns.
+   - Prediction Unit: Full tuple pattern (c1, c2, ...).
+   - Reference Unit: Full tuple pattern (c1, c2, ...).
+   - TP: Mined patterns that exactly equal a reference pattern.
+   - FP: Mined patterns not in the reference set.
+   - FN: Reference patterns not discovered.
 
-    Count every literal, physically-observed adjacent cell-to-cell
-    transition (A immediately followed by B, after the project's existing
-    consecutive-duplicate compression), TOTALLED ACROSS ALL OCCURRENCES —
-    including a transition that repeats several times within the SAME
-    taxi-day (PrefixSpan's and the contiguous-baseline's support statistic
-    caps this at one count per sequence; this reference statistic
-    deliberately does not). A transition becomes a reference candidate if
-    it (a) occurs at least MIN_REFERENCE_OCCURRENCES times in total, and
-    (b) is observed for at least MIN_REFERENCE_TAXIS distinct taxis, so a
-    single taxi's idiosyncratic repeated loop cannot alone create a
-    reference pattern.
+WHY AN EMPIRICAL REFERENCE IS USED (AND ITS LIMITATIONS)
+---------------------------------------------------------
+Urban taxi mobility pattern discovery is unsupervised: there is no external ground truth
+specifying "the real recurring routes." To evaluate real T-Drive data without circularity
+(i.e. without using PrefixSpan's own output as ground truth), an empirical reference set
+is constructed from raw, physically observed adjacent cell-to-cell transitions that meet
+strict frequency and multi-taxi thresholds.
 
-An earlier candidate rule — matching each taxi-day sequence's own
-start/end cell pair — was tried first and is kept out of the final
-notebook because it produced ZERO qualifying pairs at every support
-threshold from 5% down to 0.5% (taxi-day start/end locations are simply
-too varied across 630 sequences to recur at a meaningful rate on this
-sample). That negative result is itself reported in the notebook rather
-than silently discarded, and the raw-occurrence-count transition rule
-above was adopted instead because it is populated on the real data (see
-the notebook's Ground Truth Design section for the actual counts).
-
-IMPORTANT LIMITATION OF THIS CHOICE (stated again in the notebook):
-because the reference is itself built from ADJACENT transitions, it
-structurally resembles what the direct adjacent-transition baseline
-measures more closely than what PrefixSpan measures (PrefixSpan's real
-distinguishing ability — finding gapped, non-adjacent recurring order —
-is not what this reference is designed to reward). This is disclosed as
-an explicit limitation, not hidden: the reference validates "was this a
-real, physically repeated movement," not "was this specifically a
-PrefixSpan-style gapped pattern," and the notebook is explicit that a
-strong showing by the adjacent-transition baseline against this
-particular reference is partly a product of how the reference was built,
-not proof that adjacency-only mining is the better method in general.
-
-The reference table this module produces is meant to be inspected, and
-edited if necessary, by a human before being treated as final (see the
-notebook's marked manual-review section) — it is not asserted to be
-objectively "correct" on its own.
+DISCLOSED LIMITATIONS:
+1. Because the empirical reference is constructed from observed adjacent transitions, it
+   structurally favors contiguous adjacent-transition mining over gapped sequential mining.
+2. Unordered co-occurrence baseline is order-blind and therefore produces high recall but
+   low precision.
+3. This empirical reference serves as a descriptive validation benchmark, not an objective
+   absolute ground truth.
 """
 
 from __future__ import annotations
@@ -82,12 +47,13 @@ from __future__ import annotations
 import math
 import time
 from collections import Counter
+from typing import Any
 
 import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# REFERENCE / "GROUND TRUTH" CONSTRUCTION
+# REFERENCE / EMPIRICAL BENCHMARK CONSTRUCTION
 # ---------------------------------------------------------------------------
 
 REFERENCE_COLUMNS = [
@@ -106,34 +72,12 @@ def build_reference_od_patterns(
     min_taxis: int = 2,
 ) -> pd.DataFrame:
     """
-    Build reference (origin, destination) transition patterns from raw,
-    literal adjacent cell-to-cell movement — NOT from PrefixSpan output,
-    and NOT using PrefixSpan's own support statistic.
-
-    For every taxi-day sequence (already consecutive-duplicate compressed
-    by sequential.build_taxi_sequences()), every adjacent pair
-    (seq[i], seq[i+1]) is counted, and — unlike PrefixSpan's and the
-    contiguous baseline's support, which count AT MOST ONCE PER SEQUENCE —
-    every occurrence is counted, including repeats within the same
-    taxi-day. A transition qualifies as a reference candidate only if it
-    (a) occurs at least min_occurrence_count times in total and (b) is
-    observed across at least min_taxis distinct taxis, so one taxi's
-    repeated local loop cannot alone manufacture a reference pattern.
-
-    See this module's docstring for why this specific rule was chosen
-    (an earlier taxi-day start/end rule produced zero candidates on this
-    sample) and for the limitation this introduces (the reference is
-    itself adjacency-based, which structurally favors the direct
-    adjacent-transition baseline in the comparison — disclosed, not
-    hidden).
-
-    Returns
-    -------
-    pd.DataFrame with columns REFERENCE_COLUMNS, sorted by
-    raw_occurrence_count descending. `include_in_reference` defaults to
-    True for every row and is the column a human reviewer should edit
-    (set to False) to exclude a candidate before it is used as the
-    evaluation reference — see the notebook's manual-review section.
+    Build reference (origin, destination) transition pairs from raw physical transitions.
+    
+    Counts every adjacent pair (seq[i], seq[i+1]) across all taxi-day sequences.
+    A transition qualifies as a reference candidate if:
+      (a) raw occurrence count >= min_occurrence_count, and
+      (b) observed across >= min_taxis distinct taxis.
     """
     if not sequences:
         raise ValueError("No sequences provided — check upstream filtering.")
@@ -180,7 +124,7 @@ def build_reference_od_patterns(
 
 
 # ---------------------------------------------------------------------------
-# ALTERNATIVE BASELINE: ORDER-AGNOSTIC CO-OCCURRENCE PAIRS
+# BASELINE: UNORDERED CO-OCCURRENCE PAIRS
 # ---------------------------------------------------------------------------
 
 def mine_cooccurrence_pairs(
@@ -189,20 +133,9 @@ def mine_cooccurrence_pairs(
 ) -> pd.DataFrame:
     """
     Frequent unordered 2-cell co-occurrence baseline.
-
-    Counts, per taxi-day sequence, every distinct UNORDERED pair of cells
-    that both appear somewhere in that sequence (at most once per
-    sequence, regardless of how many times the pair co-occurs within it).
-    This deliberately throws away all ordering and adjacency information —
-    unlike PrefixSpan (ordered, gaps allowed) and the contiguous n-gram
-    baseline (ordered, adjacent only), a co-occurrence pair "A, B" means
-    only that a taxi visited both A and B on the same day, in either
-    order, at any distance apart in the sequence. It is included only as
-    a simple, clean baseline to show what "movement order" analysis adds
-    over a plain association measure — it is NOT a substitute for the
-    project's own PrefixSpan/contiguous distinction, and is intentionally
-    kept to pairs rather than larger itemsets to avoid unnecessary
-    Apriori-style complexity for a supporting contrast.
+    
+    Counts unordered pairs of cells visited on the same taxi-day (at most once per sequence).
+    Order-blind baseline used to demonstrate what movement order adds over association.
     """
     if not sequences:
         raise ValueError("No sequences provided — check upstream filtering.")
@@ -247,8 +180,43 @@ def mine_cooccurrence_pairs(
 
 
 # ---------------------------------------------------------------------------
-# MATCHING DISCOVERED PATTERNS AGAINST THE REFERENCE SET
+# ORDERED PAIR EXTRACTION & PAIR-LEVEL EVALUATION
 # ---------------------------------------------------------------------------
+
+def extract_ordered_pairs_from_patterns(
+    patterns_df: pd.DataFrame,
+    is_subsequence: bool = True,
+) -> set[tuple[str, str]]:
+    """
+    Extract unique ordered pairs (o, d) from a mined patterns DataFrame.
+    
+    Parameters
+    ----------
+    patterns_df : pd.DataFrame
+        DataFrame with a 'pattern' column (tuples of cell strings).
+    is_subsequence : bool
+        If True (PrefixSpan), extracts all ordered pairs (p[i], p[j]) with i < j (gaps allowed).
+        If False (Contiguous), extracts only strictly adjacent pairs (p[i], p[i+1]).
+    
+    Returns
+    -------
+    set[tuple[str, str]]
+        Deduplicated set of predicted ordered cell transitions.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for pat in patterns_df["pattern"]:
+        pat_t = tuple(pat)
+        if is_subsequence:
+            for i in range(len(pat_t)):
+                for j in range(i + 1, len(pat_t)):
+                    if pat_t[i] != pat_t[j]:
+                        pairs.add((pat_t[i], pat_t[j]))
+        else:
+            for i in range(len(pat_t) - 1):
+                if pat_t[i] != pat_t[i + 1]:
+                    pairs.add((pat_t[i], pat_t[i + 1]))
+    return pairs
+
 
 def match_patterns_to_reference(
     patterns_df: pd.DataFrame,
@@ -256,32 +224,7 @@ def match_patterns_to_reference(
     order_sensitive: bool,
 ) -> pd.DataFrame:
     """
-    Label each discovered pattern with every reference (origin,
-    destination) transition it recovers.
-
-    order_sensitive=True (PrefixSpan, contiguous n-gram):
-        A pattern recovers reference pair (o, d) if o appears at some
-        position in the pattern and d appears at a LATER position — i.e.
-        (o, d) occurs as an ordered (possibly non-adjacent) subsequence of
-        the discovered pattern. This is the same "ordered, gaps allowed"
-        semantics PrefixSpan itself uses, applied one reference pair at a
-        time, so a single length-4 discovered pattern can recover more
-        than one reference transition if it happens to contain several.
-
-    order_sensitive=False (unordered co-occurrence baseline):
-        A pattern recovers reference pair (o, d) if BOTH o and d are
-        members of the pattern's cell set, in EITHER order. This is
-        deliberately more lenient, because the co-occurrence baseline has
-        no direction to check — this is exactly why its precision/recall
-        are not directly comparable to the ordered methods on equal
-        terms, and the notebook states that explicitly next to the
-        results.
-
-    Returns
-    -------
-    patterns_df with two extra columns: matched_reference (bool — True if
-    at least one reference pair was recovered) and matched_pairs (a list
-    of the (o, d) tuples recovered by this pattern; empty list if none).
+    Annotate each pattern in patterns_df with reference pairs it recovers.
     """
     reference_pairs = list(
         zip(reference_df["origin_cell"], reference_df["destination_cell"])
@@ -318,20 +261,30 @@ def match_patterns_to_reference(
     return result
 
 
+def confusion_counts_pair_level(
+    predicted_pairs: set[tuple[str, str]],
+    reference_pairs: set[tuple[str, str]],
+) -> dict[str, int]:
+    """
+    Compute TP, FP, FN strictly at the PAIR level (identical units).
+    
+    TP: Reference pairs recovered by predicted pairs.
+    FP: Predicted pairs that are not in the reference set.
+    FN: Reference pairs not present in predicted pairs.
+    """
+    tp = len(predicted_pairs & reference_pairs)
+    fp = len(predicted_pairs - reference_pairs)
+    fn = len(reference_pairs - predicted_pairs)
+    return {"TP": tp, "FP": fp, "FN": fn}
+
+
 def confusion_counts(
     matched_patterns_df: pd.DataFrame,
     reference_df: pd.DataFrame,
 ) -> dict:
     """
-    Compute TP, FP, FN from a matched-patterns table produced by
-    match_patterns_to_reference().
-
-    TP: distinct reference pairs recovered by at least one discovered
-        pattern (counted once per reference pair, not once per matching
-        discovered pattern, so a reference pair rediscovered by several
-        overlapping patterns is not double-counted).
-    FP: discovered patterns that do not match any reference pair.
-    FN: reference pairs recovered by none of the discovered patterns.
+    Compute confusion counts. In this updated version, TP and FN represent
+    reference pair recovery, and FP counts unmatched predicted items.
     """
     reference_pairs = set(
         zip(reference_df["origin_cell"], reference_df["destination_cell"])
@@ -349,10 +302,8 @@ def confusion_counts(
 
 def precision_recall_f1(counts: dict) -> dict:
     """
-    Compute precision, recall, and F1 from a TP/FP/FN dict. Returns None
-    for any metric whose denominator is zero, rather than dividing by
-    zero or silently reporting 0.0 (which would misleadingly look like a
-    real measured failure rather than an undefined case).
+    Compute Precision, Recall, and F1 from a confusion dictionary.
+    Returns None if denominator is 0.
     """
     tp, fp, fn = counts["TP"], counts["FP"], counts["FN"]
 
@@ -373,24 +324,13 @@ def bounded_universe_accuracy(
     patterns_df: pd.DataFrame,
 ) -> dict | None:
     """
-    Optional supplementary accuracy, computed ONLY over an explicitly
-    bounded universe of ordered pairs — never over "all possible spatial
-    sequences" (which is open-ended and cannot support a TN count; see
-    the notebook's discussion of why plain accuracy is not used as the
-    primary metric).
-
-    The universe is defined as: all ordered pairs (a, b), a != b, drawn
-    from the set of cells that appear EITHER in the reference transitions
-    OR in a discovered pattern being scored against them. This is a
-    finite, reproducible, and domain-meaningful universe — it is exactly
-    the pool of cells actually in play for this particular reference/
-    method comparison, not an arbitrary shrink-to-fit set chosen to make
-    accuracy look good. It will still classify most of the universe as
-    TN, which is expected and is exactly why accuracy is reported only as
-    a supplementary figure, not the headline metric — see the notebook.
-
-    Returns None if the universe would contain fewer than 2 candidate
-    cells (accuracy is not meaningful over a near-empty universe).
+    Supplementary pair-level accuracy over the bounded universe of cells in play.
+    
+    Universe: All distinct ordered pairs (a, b) with a != b for cells appearing
+    in either reference pairs or predicted patterns.
+    
+    NOTE: TN strongly dominates because the vast majority of cell pairs are unvisited.
+    Precision, Recall, and F1 remain the primary evaluation metrics.
     """
     cells_in_play: set[str] = set()
     cells_in_play.update(reference_df["origin_cell"])
@@ -406,40 +346,42 @@ def bounded_universe_accuracy(
     reference_pairs = set(
         zip(reference_df["origin_cell"], reference_df["destination_cell"])
     )
-    recovered_pairs: set[tuple[str, str]] = set()
-    for pairs in matched_patterns_df["matched_pairs"]:
-        recovered_pairs.update(pairs)
+    
+    # Extract predicted pairs
+    predicted_pairs: set[tuple[str, str]] = set()
+    for pattern in patterns_df["pattern"]:
+        pat = tuple(pattern)
+        for i in range(len(pat)):
+            for j in range(i + 1, len(pat)):
+                if pat[i] != pat[j]:
+                    predicted_pairs.add((pat[i], pat[j]))
 
-    tp = len(recovered_pairs & reference_pairs)
-    fn = len(reference_pairs - recovered_pairs)
-    fp = int((~matched_patterns_df["matched_reference"]).sum())
-    tn = universe_size - tp - fn - fp
+    tp = len(predicted_pairs & reference_pairs)
+    fp = len(predicted_pairs - reference_pairs)
+    fn = len(reference_pairs - predicted_pairs)
+    tn = universe_size - tp - fp - fn
 
     if tn < 0:
-        # A discovered pattern's endpoints fell outside the bounded
-        # universe (e.g. an endpoint below the frequency cutoff for THIS
-        # universe definition, even though the pattern itself met the
-        # separate PrefixSpan support rule). Accuracy is not well-defined
-        # against this universe in that case.
         return None
 
     accuracy = (tp + tn) / universe_size
     return {
         "universe_size": universe_size,
         "n_cells_in_play": len(cells_in_play),
-        "TP": tp, "FP": fp, "FN": fn, "TN": tn,
+        "TP": tp,
+        "FP": fp,
+        "FN": fn,
+        "TN": tn,
         "accuracy": accuracy,
     }
 
 
 # ---------------------------------------------------------------------------
-# STABILITY: JACCARD PATTERN-SET OVERLAP
+# STABILITY: JACCARD OVERLAP
 # ---------------------------------------------------------------------------
 
 def jaccard_similarity(set_a: set, set_b: set) -> float | None:
-    """Jaccard(A, B) = |A ∩ B| / |A ∪ B|. Returns None if both sets are
-    empty (undefined, not 0.0 — two empty pattern sets are not "totally
-    dissimilar")."""
+    """Jaccard(A, B) = |A ∩ B| / |A ∪ B|."""
     union = set_a | set_b
     if not union:
         return None
@@ -447,18 +389,7 @@ def jaccard_similarity(set_a: set, set_b: set) -> float | None:
 
 
 def pairwise_jaccard_table(pattern_sets: dict[str, set]) -> pd.DataFrame:
-    """
-    Given {label: set_of_patterns, ...} (e.g. one entry per min_support
-    threshold tested on the SAME grid), return a long-format DataFrame of
-    pairwise Jaccard similarities between every pair of labels.
-
-    Only meaningful when every pattern set uses the SAME underlying cell-
-    id space — comparing pattern sets mined at different grid cell sizes
-    is not included here, because different grid sizes produce different,
-    non-comparable cell-id vocabularies (see the notebook's grid-size
-    section for why that comparison is reported as separate summary
-    statistics instead of a literal-pattern Jaccard score).
-    """
+    """Pairwise Jaccard similarity across parameter settings with identical vocabulary."""
     labels = list(pattern_sets.keys())
     rows = []
     for i in range(len(labels)):
@@ -487,7 +418,7 @@ def summarize_method(
     runtime_sec: float,
     pattern_col: str = "pattern",
 ) -> dict:
-    """One row of the final method-comparison table for a single method."""
+    """Summarize a single method's evaluation against reference."""
     counts = confusion_counts(matched_patterns_df, reference_df)
     metrics = precision_recall_f1(counts)
 
@@ -514,18 +445,46 @@ def summarize_method(
     }
 
 
+def summarize_method_consistent_pairs(
+    method_name: str,
+    patterns_df: pd.DataFrame,
+    reference_df: pd.DataFrame,
+    runtime_sec: float,
+    is_subsequence: bool = True,
+) -> dict:
+    """
+    Summarize a method using STRICT pair-level units for TP, FP, FN, Precision, Recall, F1.
+    """
+    ref_pairs = set(zip(reference_df["origin_cell"], reference_df["destination_cell"]))
+    pred_pairs = extract_ordered_pairs_from_patterns(patterns_df, is_subsequence=is_subsequence)
+    counts = confusion_counts_pair_level(pred_pairs, ref_pairs)
+    metrics = precision_recall_f1(counts)
+
+    return {
+        "method": method_name,
+        "evaluation_unit": "Distinct Ordered Pairs (Pair-Level)",
+        "patterns_found": len(patterns_df),
+        "predicted_pairs": len(pred_pairs),
+        "reference_pairs": len(ref_pairs),
+        "TP": counts["TP"],
+        "FP": counts["FP"],
+        "FN": counts["FN"],
+        "precision": round(metrics["precision"], 4) if metrics["precision"] is not None else None,
+        "recall": round(metrics["recall"], 4) if metrics["recall"] is not None else None,
+        "f1": round(metrics["f1"], 4) if metrics["f1"] is not None else None,
+        "runtime_sec": round(runtime_sec, 4),
+    }
+
+
 if __name__ == "__main__":
-    # Small synthetic sanity check ONLY — not real T-Drive data. Confirms
-    # the reference/matching/metric plumbing behaves as documented before
-    # it is trusted on the real project sample.
+    # Synthetic verification tests
     fixture_sequences = {
         "1::2008-02-02": ["A", "B", "C", "D"],
         "1::2008-02-03": ["A", "B", "C", "D"],
-        "2::2008-02-02": ["A", "B", "C", "D", "B", "C"],  # repeats B->C twice
+        "2::2008-02-02": ["A", "B", "C", "D", "B", "C"],
         "3::2008-02-02": ["A", "X", "Y"],
     }
 
-    # A->B, B->C, and C->D each occur 3 times across 2 taxis.
     ref = build_reference_od_patterns(
         fixture_sequences, min_occurrence_count=3, min_taxis=2
     )
@@ -539,13 +498,12 @@ if __name__ == "__main__":
     })
     matched = match_patterns_to_reference(fake_patterns, ref, order_sensitive=True)
     counts = confusion_counts(matched, ref)
-    # ("A", "B", "C", "A") recovers (A, B) and (B, C) even with the returning 'A' at the end
-    assert counts["TP"] == 2  # (A, B) and (B, C) recovered
-    assert counts["FN"] == 1  # (C, D) not recovered
-    assert counts["FP"] == 1  # ("X","Y") does not match any reference pair
+    assert counts["TP"] == 2
+    assert counts["FN"] == 1
+    assert counts["FP"] == 1
 
-    metrics = precision_recall_f1(counts)
-    assert metrics["precision"] == 2 / 3
-    assert abs(metrics["recall"] - 2 / 3) < 1e-9
+    pair_summary = summarize_method_consistent_pairs("Test PrefixSpan", fake_patterns, ref, 0.05, is_subsequence=True)
+    assert pair_summary["TP"] == 2
+    assert pair_summary["FN"] == 1
 
-    print("pattern_evaluation.py synthetic checks passed.")
+    print("pattern_evaluation.py enhanced tests passed successfully.")

@@ -166,7 +166,13 @@ def style_fig(fig, height=360):
 # DATA LOADING — reads ONLY precomputed pipeline outputs, never raw GPS data
 # ===========================================================================
 APP_DIR = Path(__file__).resolve().parent
-_CANDIDATES = [APP_DIR / "output", APP_DIR.parent / "output", APP_DIR / "data" / "output"]
+_CANDIDATES = [
+    APP_DIR.parent / "outputs",
+    APP_DIR / "outputs",
+    APP_DIR / "output",
+    APP_DIR.parent / "output",
+    APP_DIR / "data" / "output",
+]
 DATA_DIR = next((p for p in _CANDIDATES if p.exists()), _CANDIDATES[0])
 RESULTS_DIR = DATA_DIR / "results"
 TABLES_DIR = DATA_DIR / "tables"
