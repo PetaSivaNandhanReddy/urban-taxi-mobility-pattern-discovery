@@ -1,0 +1,5 @@
+time_segment,n_taxi_day_segment_sequences,min_support_count,n_patterns_found
+afternoon,581,29,0
+evening,506,25,0
+night,477,24,0
+morning,411,21,0

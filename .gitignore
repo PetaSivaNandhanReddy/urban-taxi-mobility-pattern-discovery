@@ -1,0 +1,40 @@
+# Data - never commit raw/processed data (too large, and often not redistributable)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/samples/*
+!data/samples/.gitkeep
+
+# Large outputs
+outputs/maps/*.html
+outputs/figures/*.png
+outputs/results/*
+dashboard/output/
+
+# Environment / secrets
+.env
+*.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

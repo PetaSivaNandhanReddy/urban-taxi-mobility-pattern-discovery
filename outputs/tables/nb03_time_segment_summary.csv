@@ -1,0 +1,5 @@
+time_segment,n_sequences,min_support_count,n_patterns_len_ge_2
+afternoon,581,30,0
+evening,506,26,0
+morning,411,21,0
+night,477,24,0

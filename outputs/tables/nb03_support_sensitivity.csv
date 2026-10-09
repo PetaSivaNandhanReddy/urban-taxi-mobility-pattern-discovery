@@ -1,0 +1,4 @@
+min_support,min_support_count,n_patterns,is_primary_analysis
+0.01,7,39785,False
+0.02,13,3426,False
+0.05,32,22,True

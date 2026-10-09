@@ -1,0 +1,4 @@
+min_support,n_patterns,avg_pattern_length,max_pattern_length,runtime_sec
+0.01,73999,2.45,4,15.98
+0.02,3426,2.05,4,1.99
+0.05,22,2.0,2,0.22

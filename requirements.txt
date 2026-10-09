@@ -1,0 +1,27 @@
+# Urban Taxi Mobility Pattern Discovery
+# Phase 1-4 dependencies (data loading/cleaning/EDA, spatial
+# discretization, sequential pattern mining, DBSCAN clustering, temporal
+# analysis, integration, the Streamlit dashboard, and Phase 4's pattern
+# ranking / anomaly detection / planning insights / research evaluation —
+# the latter four introduce no new packages beyond what's already listed).
+
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+geopandas>=0.13.0
+shapely>=2.0.0
+pyproj>=3.5.0
+scikit-learn>=1.3.0
+folium>=0.14.0
+plotly>=5.15.0
+jupyter>=1.0.0
+ipykernel>=6.25.0
+tqdm>=4.65.0
+
+# Phase 2 additions
+prefixspan>=0.5.2   # PrefixSpan sequential pattern mining
+
+# Phase 3 additions
+streamlit>=1.32.0
+streamlit-folium>=0.20.0   # embeds Folium maps inside Streamlit

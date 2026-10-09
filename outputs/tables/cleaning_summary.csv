@@ -1,0 +1,8 @@
+stage,records_remaining,records_removed
+Original records,129545,0
+After taxi_id cleaning,129545,0
+After timestamp cleaning,129545,0
+After coordinate validity cleaning,128800,745
+After out-of-region flagging (none dropped),128800,0
+After duplicate removal,116913,11887
+Final records,116913,0
