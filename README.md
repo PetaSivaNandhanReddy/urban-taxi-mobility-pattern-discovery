@@ -184,54 +184,69 @@ To prevent mixing incompatible prediction units (e.g. counting reference pairs a
 
 ### 7.2 Real-Data Empirical Reference Comparison (T-Drive Sample)
 
-| Method | Discovered Pairs | Reference Pairs | TP | FP | FN | Pair Precision | Pair Recall | Pair F1 | Runtime (s) |
+Evaluated strictly at the **ordered cell-pair level** $(o, d)$:
+
+| Method | Predicted Pairs | Reference Pairs | TP | FP | FN | Pair Precision | Pair Recall | Pair F1 | Runtime (s) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **PrefixSpan (Gapped Sequential)** | 22 | 35 | **11** | 11 | 24 | **0.5000** | **0.3143** | **0.3860** | 0.638s |
-| **Direct Contiguous Transition** | 2 | 35 | 2 | 0 | 33 | **1.0000** | 0.0571 | 0.1081 | 0.317s |
-| **Unordered Co-occurrence** | 158 | 35 | 25 | 133 | 10 | 0.1582 | **0.7143** | 0.2591 | 3.350s |
+| **PrefixSpan (Gapped Sequential)** | 20 | 35 | **11** | 9 | 24 | **0.5500** | **0.3143** | **0.4000** | 0.523s |
+| **Direct Contiguous Transition** | 2 | 35 | 2 | 0 | 33 | **1.0000** | 0.0571 | 0.1081 | 0.055s |
+| **Unordered Co-occurrence (Symmetric)** | 158 | 35 | 17 | 141 | 18 | 0.1076 | 0.4857 | 0.1762 | 2.420s |
 
 *Key Findings*:
-- PrefixSpan achieves the highest balanced $F1$ score ($0.3860$) by discovering ordered transitions with moderate precision and recall.
-- Direct Adjacent mining achieves perfect precision ($1.0000$) but severe under-recall ($0.0571$) because it misses transitions when intervening cells exist.
-- Unordered Co-occurrence achieves high recall ($0.7143$) but poor precision ($0.1582$) due to 133 false positive pairs caused by lack of directional order.
+- **PrefixSpan achieves the highest balanced $F1$ score ($0.4000$)** by discovering ordered transitions with moderate precision ($0.5500$) and recall ($0.3143$).
+- **Direct Contiguous mining** achieves 100% precision on recovered pairs but severe under-recall ($0.0571$) because it misses transitions when intervening cells exist.
+- **Unordered Co-occurrence** suffers from 141 false positive directed pairs because it cannot establish travel direction (F1: $0.1762$). Under an order-agnostic comparison (undirected pairs), it achieves $0.1329$ precision and $0.7000$ recall (F1: $0.2234$).
 
 ### 7.3 Objective Synthetic Planted Benchmark Results
 
-In a controlled environment with 350 synthetic taxi-days and planted frequent corridors with inserted noise and gaps:
+Tested against 5 deliberately planted patterns with controlled noise in 350 generated taxi-days, evaluated against **realized support** in the finite sample:
 
-| Method | Evaluation Level | TP | FP | FN | Precision | Recall | F1 Score | Runtime (s) |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **PrefixSpan** | Pair-Level (Ordered Transitions) | **10** | 10 | **0** | 0.5000 | **1.0000** | **0.6667** | 0.027s |
-| **Direct Contiguous** | Pair-Level (Ordered Transitions) | 6 | **0** | 4 | **1.0000** | 0.6000 | 0.7500 | 0.015s |
-| **Unordered Co-occurrence** | Pair-Level (Ordered Transitions) | 10 | 522 | 0 | 0.0188 | 1.0000 | 0.0369 | 0.013s |
+| Evaluation Level | Method | Predicted | Reference | TP | FP | FN | Precision | Recall | F1 Score |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Pair-Level** | **PrefixSpan (Gapped)** | 58 | 13 | **13** | 45 | **0** | 0.2241 | **1.0000** | **0.3662** |
+| Pair-Level | Direct Adjacent | 8 | 13 | 8 | 0 | 5 | 1.0000 | 0.6154 | 0.7619 |
+| Pair-Level | Co-occurrence (Symmetric) | 558 | 13 | 13 | 545 | 0 | 0.0233 | 1.0000 | 0.0455 |
+| **Pattern-Level** | **PrefixSpan (Gapped)** | 68 | 4 | **4** | 64 | **0** | 0.0588 | **1.0000** | **0.1111** |
+| Pattern-Level | Direct Adjacent | 10 | 4 | 3 | 7 | 1 | 0.3000 | 0.7500 | 0.4286 |
 
 *Key Synthetic Insights*:
 - **PrefixSpan achieves 100% recall** on planted corridors even when noise is injected between corridor cells.
-- **Direct Contiguous transitions miss 40% of planted transitions** ($Recall = 0.60$) whenever non-systematic noise intervenes.
+- **Direct Contiguous transitions miss 38.5% of planted transitions** ($Recall = 0.6154$) whenever noise intervenes.
+- Rare pattern `(RARE_D1, RARE_D2)` with 4.57% realized support was correctly excluded from required ground truth under the 10% threshold.
+
+### 7.4 Nested T-Drive Sample-Size Scaling (99 → 250 → 500 Taxis)
+
+| Sample Tier | Active Taxis | Clean GPS Points | Taxi-Days | Min Support Count (5%) | Discovered Patterns | Reference Transitions | Pair F1 | Runtime (s) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline** | 99 | 116,913 | 630 | 32 | 22 | 35 | **0.4000** | 2.47s |
+| **Medium** | 249 | 371,399 | 1,592 | 80 | 46 | 111 | 0.0632 | 8.39s |
+| **Large** | 497 | 833,316 | 3,185 | 160 | 43 | 204 | 0.0205 | 23.96s |
+
+*Key Scaling Takeaway*: A constant relative support threshold (5%) increases in absolute stringency as the fleet grows (requiring 160 distinct taxi-days for 497 taxis vs 32 for 99 taxis).
 
 ---
 
-## 8. Running Automated Unit Tests
+## 8. Running Automated Unit & Dashboard Tests
 
-Run the complete test suite:
+Run the complete 19-test automated test suite:
 
 ```powershell
-python tests/test_evaluation.py
-python src/synthetic_benchmark.py
+python -m unittest discover -s tests
 ```
 
 Expected output:
 ```
-Running automated test suite for evaluation methodology...
-  [PASS] test_multiple_reference_recovery
-  [PASS] test_no_reference_recovery_and_zero_tp
-  [PASS] test_repeated_cells_in_pattern
-  [PASS] test_duplicate_prediction_handling
-  [PASS] test_empty_predictions
-  [PASS] test_empty_reference
-  [PASS] test_synthetic_planted_benchmark_execution
+Ran 19 tests in 6.55s — ALL 19 TESTS PASSED (100% SUCCESS)
+```
 
-ALL 7 AUTOMATED EVALUATION TESTS PASSED SUCCESSFULLY!
+To run all experiments end-to-end:
+```powershell
+python src/experiment_runner.py
+```
+
+To launch the Streamlit Mobility Intelligence Dashboard:
+```powershell
+streamlit run dashboard/app.py
 ```
 
 ---

@@ -5,12 +5,13 @@ Sequential and spatial data mining on urban taxi GPS trajectories, using
 the Microsoft Research **T-Drive** dataset as a generic benchmark
 (methodology designed to later accept an Indian taxi dataset as well).
 
-> **Status: Phase 1 complete.** Dataset acquisition, project setup, data
-> understanding, loading, cleaning, trajectory reconstruction, EDA, and an
-> initial map. Sequential mining, spatial clustering (DBSCAN), corridor
-> integration, and the dashboard are **not yet implemented** — see
-> "Current Progress" below.
+> [!NOTE]
+> **HISTORICAL ARCHIVE NOTICE**: This file preserves the initial Phase 1 project milestone notes for provenance.
+> For the authoritative, complete, and finalized project documentation, see the primary [README.md](README.md) and the comprehensive research report in [reports/final_research_report.md](reports/final_research_report.md).
 
+> **Status: Archived Phase 1 Milestone.** Dataset acquisition, project setup, data
+> understanding, loading, cleaning, trajectory reconstruction, EDA, and an
+> initial map.
 ---
 
 ## 1. Project Overview

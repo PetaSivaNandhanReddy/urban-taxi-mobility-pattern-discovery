@@ -217,6 +217,17 @@ def load_all():
         "cleaning_summary": t("cleaning_summary.csv"),
         "trajectory_stats": t("trajectory_length_stats.csv"),
         "planning_insights": r("transportation_planning_insights.csv"),
+        "method_comparison": r("evaluation_method_comparison.csv"),
+        "precision_recall_f1": r("evaluation_precision_recall_f1.csv"),
+        "cooccurrence_order_agnostic": r("evaluation_cooccurrence_order_agnostic.csv"),
+        "evaluation_summary": r("evaluation_summary.csv"),
+        "support_sensitivity": r("evaluation_support_thresholds.csv"),
+        "grid_sensitivity": r("evaluation_grid_sizes.csv"),
+        "pattern_stability": r("evaluation_pattern_stability.csv"),
+        "synthetic_planted": r("synthetic_benchmark_planted_table.csv"),
+        "synthetic_pair_eval": r("synthetic_benchmark_pair_level.csv"),
+        "synthetic_pattern_eval": r("synthetic_benchmark_pattern_level.csv"),
+        "sample_scaling": r("sample_expansion_comparison.csv"),
     }
     return data
 
@@ -370,6 +381,7 @@ ADMIN_SECTIONS = [
     "Mobility Corridors",
     "Taxi Allocation",
     "Rare Mobility",
+    "Methodology & Evaluation",
     "Export",
 ]
 CUSTOMER_SECTIONS = [
@@ -386,9 +398,22 @@ else:
     section = st.sidebar.radio("Section", CUSTOMER_SECTIONS, index=0)
 
 st.sidebar.divider()
+st.sidebar.markdown(
+    f"""
+    <div style="background:{PANEL}; border:1px solid {BORDER}; border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:0.78rem;">
+      <div style="color:{TEAL}; font-weight:600; margin-bottom:4px;">RUN CONFIGURATION</div>
+      <div>Grid Size: <b>500 m</b></div>
+      <div>Min Support: <b>5.0% (≥32 taxi-days)</b></div>
+      <div>Sample: <b>99 Taxis (630 Sequences)</b></div>
+      <div>Period: <b>2008-02-02 to 2008-02-08</b></div>
+      <div style="color:{MUTED}; margin-top:4px;">Historical Trajectory Analysis</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.sidebar.caption(
     "All results are computed once by the offline analytical pipeline "
-    "(Notebooks 01–04) and read here from cached CSV tables — this "
+    "(Notebooks 01–05) and read here from cached CSV tables — this "
     "dashboard never re-runs DBSCAN or PrefixSpan."
 )
 if DATA.get("kpis") is not None:
@@ -454,6 +479,20 @@ if mode == "Administrator":
             kpi_row(row1)
             st.write("")
             kpi_row(row2)
+
+            if available("method_comparison"):
+                mc = DATA["method_comparison"]
+                ps_rows = mc[mc["method"].str.contains("PrefixSpan")]
+                if len(ps_rows) > 0:
+                    psr = ps_rows.iloc[0]
+                    row3 = [
+                        ("PrefixSpan Precision", fmt_pct(float(psr.get("precision", 0)) * 100, 1), "TP / (TP + FP) evaluated on distinct ordered cell pairs"),
+                        ("PrefixSpan Recall", fmt_pct(float(psr.get("recall", 0)) * 100, 1), "TP / (TP + FN) evaluated on distinct ordered cell pairs"),
+                        ("PrefixSpan F1 Score", fmt_pct(float(psr.get("f1", 0)) * 100, 1), "Harmonic mean of pair precision & recall"),
+                        ("Reference Transitions", fmt_int(psr.get("reference_pairs")), "Observed recurring transitions meeting reference criteria"),
+                    ]
+                    st.write("")
+                    kpi_row(row3)
 
             st.write("")
             c1, c2 = st.columns(2)
@@ -753,6 +792,124 @@ if mode == "Administrator":
             )
 
     # ------------------------------------------------------------------
+    elif section == "Methodology & Evaluation":
+        st.subheader("Model Evaluation & Scientific Methodology")
+        st.markdown(
+            """<div class="mob-banner"><b>Academic Evaluation Framework</b>: 
+            Urban mobility pattern discovery is unsupervised. This section reports:
+            1) Real-data evaluation using strictly uniform <b>ordered cell pairs</b>,
+            2) An <b>objective synthetic benchmark</b> with known planted patterns evaluated against <i>realized support</i>,
+            3) <b>Parameter sensitivity</b> across support thresholds and spatial grid sizes, and
+            4) <b>Nested sample scaling</b> from 99 to 250 and 500 taxis.</div>""",
+            unsafe_allow_html=True,
+        )
+
+        tab_real, tab_syn, tab_sens, tab_scale, tab_limits = st.tabs([
+            "Real-Data Pair Evaluation",
+            "Objective Synthetic Benchmark",
+            "Parameter Sensitivity & Stability",
+            "Sample Size Scaling (99–500 Taxis)",
+            "Methodological Limitations",
+        ])
+
+        with tab_real:
+            st.markdown("### Real-Data Pair-Level Method Comparison")
+            st.caption(
+                "Evaluated against empirical reference transitions (count ≥ 15 across ≥ 2 taxis) "
+                "using strictly identical ordered cell-pair units (origin, destination)."
+            )
+            if available("method_comparison"):
+                mc = DATA["method_comparison"].copy()
+                cols = {
+                    "method": "Mining Method",
+                    "evaluation_unit": "Evaluation Unit",
+                    "predicted_pairs": "Predicted Pairs",
+                    "reference_pairs": "Reference Pairs",
+                    "TP": "TP", "FP": "FP", "FN": "FN",
+                    "precision": "Precision", "recall": "Recall", "f1": "F1 Score",
+                    "runtime_sec": "Runtime (s)",
+                }
+                st.dataframe(mc[[c for c in cols if c in mc.columns]].rename(columns=cols), hide_index=True, width="stretch")
+            else:
+                not_available("Method comparison table not found.")
+
+            st.markdown("#### Order-Agnostic Co-occurrence Baseline")
+            st.caption(
+                "Because co-occurrence does not model travel direction, here both predictions and "
+                "reference transitions are collapsed to undirected sets {origin, destination}."
+            )
+            if available("cooccurrence_order_agnostic"):
+                oa = DATA["cooccurrence_order_agnostic"].copy()
+                st.dataframe(oa, hide_index=True, width="stretch")
+
+        with tab_syn:
+            st.markdown("### Objective Synthetic Ground-Truth Benchmark")
+            st.caption(
+                "Tested against known, deliberately planted patterns with controlled noise. "
+                "Ground-truth status is decided by REALIZED support in the finite generated sample."
+            )
+            if available("synthetic_planted"):
+                st.markdown("**Realized Support of Planted Patterns in Generated Sample**")
+                sp = DATA["synthetic_planted"].copy()
+                st.dataframe(sp, hide_index=True, width="stretch")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Pair-Level Ground-Truth Recovery**")
+                if available("synthetic_pair_eval"):
+                    st.dataframe(DATA["synthetic_pair_eval"][["method", "TP", "FP", "FN", "precision", "recall", "f1"]], hide_index=True, width="stretch")
+            with c2:
+                st.markdown("**Pattern-Level Ground-Truth Recovery**")
+                if available("synthetic_pattern_eval"):
+                    st.dataframe(DATA["synthetic_pattern_eval"][["method", "TP", "FP", "FN", "precision", "recall", "f1"]], hide_index=True, width="stretch")
+
+        with tab_sens:
+            st.markdown("### Support Threshold & Grid Resolution Sensitivity")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**PrefixSpan Support Thresholds (500m Grid)**")
+                if available("support_sensitivity"):
+                    st.dataframe(DATA["support_sensitivity"][["min_support_pct", "min_support_count", "n_patterns", "runtime_sec", "ref_f1"]], hide_index=True, width="stretch")
+            with c2:
+                st.markdown("**Jaccard Stability Across Support Thresholds**")
+                if available("pattern_stability"):
+                    st.dataframe(DATA["pattern_stability"][["set_a", "set_b", "n_a", "n_b", "n_intersection", "jaccard"]], hide_index=True, width="stretch")
+
+            st.markdown("**Spatial Grid Cell Size Sensitivity (5% Support Threshold)**")
+            if available("grid_sensitivity"):
+                st.dataframe(DATA["grid_sensitivity"][["grid_cell_size_m", "n_occupied_cells", "avg_points_per_cell", "n_sequences", "n_patterns_at_5pct", "total_runtime_sec"]], hide_index=True, width="stretch")
+            st.caption("Note: Direct Jaccard comparison across different grid resolutions is excluded because cell IDs do not represent the same geographic entities.")
+
+        with tab_scale:
+            st.markdown("### Deterministic Nested Sample-Size Expansion")
+            st.caption(
+                "Evaluates whether discovered patterns persist when expanding fleet coverage. "
+                "Samples are strictly nested: 99 taxis ⊂ 249 taxis ⊂ 497 taxis."
+            )
+            if available("sample_scaling"):
+                st.dataframe(DATA["sample_scaling"][[
+                    "sample_label", "active_taxis_processed", "cleaned_gps_points", "n_taxi_day_sequences",
+                    "min_support_count_required", "n_discovered_patterns", "ref_f1", "total_pipeline_time_sec"
+                ]], hide_index=True, width="stretch")
+            st.caption(
+                "Important Takeaway: Because support threshold is relative (5.0%), expanding the fleet from "
+                "630 to 3,185 sequences raises the required absolute sequence count from 32 to 160 taxi-days, "
+                "which is a significantly stricter cross-fleet coordination threshold."
+            )
+
+        with tab_limits:
+            st.markdown("### Methodological Assumptions & Limitations")
+            st.markdown(
+                """
+                - **Empirical Reference Set**: Real-world evaluation uses observed physical adjacent transitions meeting minimum recurrence rules. It serves as an agreement validation, not definitive external ground truth.
+                - **Structural Bias Toward Direct Mining**: Because reference transitions are adjacent cell pairs, contiguous direct-transition mining structurally achieves 100% precision on recovered pairs.
+                - **GPS Traces vs Passenger Demand**: GPS volume represents commercial taxi movements in a sampled fleet. It is an activity proxy, not proof of passenger demand or road congestion.
+                - **Bounded-Universe Accuracy Artifact**: True negatives drastically dominate spatial networks (>98%), producing artificially high accuracy (~98.6%). Precision, Recall, and F1 remain the primary metrics.
+                - **No Causation**: Frequent sequential patterns are observed statistical orderings, not evidence of causation.
+                """
+            )
+
+    # ------------------------------------------------------------------
     elif section == "Export":
         st.subheader("Export processed results")
         st.caption("Download the exact processed tables this dashboard is built from.")
@@ -763,6 +920,9 @@ if mode == "Administrator":
             ("Rare mobility transitions", "rare_transitions", "rare_mobility_transitions.csv"),
             ("Mobility corridors", "corridor_table", "mobility_corridors.csv"),
             ("Hourly activity", "activity_hour", "activity_by_hour.csv"),
+            ("Method comparison (pair-level)", "method_comparison", "evaluation_method_comparison.csv"),
+            ("Synthetic benchmark (planted)", "synthetic_planted", "synthetic_benchmark_planted.csv"),
+            ("Sample size scaling", "sample_scaling", "sample_expansion_scaling.csv"),
         ]
         for label, key, fname in exports:
             df = DATA.get(key)
