@@ -21,7 +21,128 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import COL_LAT, COL_LON, COL_TAXI_ID, COL_TIMESTAMP
+from config import (
+    COL_LAT,
+    COL_LON,
+    COL_TAXI_ID,
+    COL_TIMESTAMP,
+    MIN_TRIP_POINTS,
+    TRIP_DWELL_TIME_THRESHOLD_SEC,
+    TRIP_MAX_TIME_GAP_SEC,
+)
+
+
+def segment_trajectories(
+    df: pd.DataFrame,
+    dwell_threshold_sec: float = TRIP_DWELL_TIME_THRESHOLD_SEC,
+    max_gap_sec: float = TRIP_MAX_TIME_GAP_SEC,
+    min_points: int = MIN_TRIP_POINTS,
+) -> pd.DataFrame:
+    """Segment continuous taxi trajectories into discrete trips/sessions.
+
+    Since T-Drive does not include passenger occupancy flags, trips are
+    inferred objectively from physical movement boundaries:
+      1. Calendar-day boundaries (preventing cross-day artificial jumps).
+      2. Temporal signal loss or long off-duty gaps (time_diff >= max_gap_sec).
+      3. Stationary dwell periods (time_diff >= dwell_threshold_sec with distance < 50m).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Trajectory DataFrame (output of build_trajectories or run_cleaning_pipeline).
+    dwell_threshold_sec : float
+        Stationary duration (seconds) indicating a potential stop/session boundary.
+    max_gap_sec : float
+        Maximum allowable time gap (seconds) between pings within one trip.
+    min_points : int
+        Minimum points required for a valid trip segment.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with an added `trip_id` column (e.g. "1::20080202::T001").
+    """
+    if "time_diff_sec" not in df.columns or "distance_m" not in df.columns:
+        df = build_trajectories(df)
+    else:
+        df = df.copy()
+
+    # Identify boundary conditions
+    taxi_changed = df[COL_TAXI_ID] != df[COL_TAXI_ID].shift(1)
+    date_changed = df[COL_TIMESTAMP].dt.date != df[COL_TIMESTAMP].shift(1).dt.date
+    large_gap = df["time_diff_sec"] >= max_gap_sec
+    dwell_stop = (df["time_diff_sec"] >= dwell_threshold_sec) & (df["distance_m"] < 50.0)
+
+    # First point of dataframe is always a boundary
+    new_segment_flag = taxi_changed | date_changed | large_gap | dwell_stop
+    new_segment_flag.iloc[0] = True
+
+    # Assign segment index per taxi
+    df["_seg_id"] = new_segment_flag.cumsum()
+    df["trip_id"] = (
+        df[COL_TAXI_ID].astype(str)
+        + "::"
+        + df[COL_TIMESTAMP].dt.strftime("%Y%m%d")
+        + "::T"
+        + df["_seg_id"].astype(str)
+    )
+    df = df.drop(columns=["_seg_id"])
+
+    # Flag incomplete / too-short segments
+    trip_counts = df.groupby("trip_id")["trip_id"].transform("count")
+    df["is_valid_trip"] = trip_counts >= min_points
+
+    return df
+
+
+def summarize_trips(segmented_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize segmented trips into an OD journey table with durations.
+
+    Filters to valid trips (is_valid_trip == True).
+
+    Returns
+    -------
+    pd.DataFrame
+        trip_id, taxi_id, date, start_time, end_time, duration_sec,
+        start_lat, start_lon, end_lat, end_lon, total_distance_m, n_points.
+    """
+    if "trip_id" not in segmented_df.columns:
+        raise ValueError("segmented_df must have 'trip_id' column from segment_trajectories().")
+
+    valid_df = segmented_df[segmented_df["is_valid_trip"]].copy()
+    if len(valid_df) == 0:
+        return pd.DataFrame(
+            columns=[
+                "trip_id", "taxi_id", "date", "start_time", "end_time", "duration_sec",
+                "start_lat", "start_lon", "end_lat", "end_lon", "total_distance_m", "n_points",
+            ]
+        )
+
+    trips = []
+    for trip_id, group in valid_df.groupby("trip_id", sort=False):
+        group = group.sort_values(COL_TIMESTAMP)
+        start_pt = group.iloc[0]
+        end_pt = group.iloc[-1]
+        duration = (end_pt[COL_TIMESTAMP] - start_pt[COL_TIMESTAMP]).total_seconds()
+        dist = group["distance_m"].sum(skipna=True)
+
+        trips.append({
+            "trip_id": trip_id,
+            "taxi_id": str(start_pt[COL_TAXI_ID]),
+            "date": start_pt[COL_TIMESTAMP].date(),
+            "start_time": start_pt[COL_TIMESTAMP],
+            "end_time": end_pt[COL_TIMESTAMP],
+            "duration_sec": max(0.0, float(duration)),
+            "start_lat": float(start_pt[COL_LAT]),
+            "start_lon": float(start_pt[COL_LON]),
+            "end_lat": float(end_pt[COL_LAT]),
+            "end_lon": float(end_pt[COL_LON]),
+            "total_distance_m": float(dist),
+            "n_points": len(group),
+        })
+
+    return pd.DataFrame(trips)
+
 
 # A speed above this is flagged as a suspicious GPS jump. 150 km/h is well
 # above realistic urban taxi speeds but avoids over-flagging highway travel.

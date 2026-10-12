@@ -338,6 +338,43 @@ def rank_patterns(
     return normalize_and_score(with_metrics, weights=weights)
 
 
+def evaluate_weight_sensitivity(
+    patterns_with_metrics: pd.DataFrame,
+    weight_schemes: dict[str, dict[str, float]] | None = None,
+) -> pd.DataFrame:
+    """Evaluate how pattern rankings shift across different weighting strategies.
+
+    Computes pairwise Spearman rank correlation across different weighting schemes
+    to verify whether rankings are robust or hyper-sensitive to specific weights.
+    """
+    if weight_schemes is None:
+        weight_schemes = {
+            "equal_weights": PATTERN_SCORE_WEIGHTS,
+            "support_heavy": {
+                "support": 0.40, "n_taxis": 0.20, "temporal_consistency": 0.10,
+                "spatial_density": 0.10, "pattern_length": 0.10, "recurrence": 0.10,
+            },
+            "temporal_heavy": {
+                "support": 0.10, "n_taxis": 0.10, "temporal_consistency": 0.40,
+                "spatial_density": 0.10, "pattern_length": 0.10, "recurrence": 0.20,
+            },
+            "spatial_heavy": {
+                "support": 0.10, "n_taxis": 0.10, "temporal_consistency": 0.10,
+                "spatial_density": 0.40, "pattern_length": 0.20, "recurrence": 0.10,
+            },
+        }
+
+    ranks_df = pd.DataFrame()
+    for scheme_name, weights in weight_schemes.items():
+        scored = normalize_and_score(patterns_with_metrics, weights=weights)
+        # Store rank index
+        ranks_df[scheme_name] = scored["composite_score"].rank(ascending=False)
+
+    corr_matrix = ranks_df.corr(method="spearman").round(4)
+    return corr_matrix
+
+
+
 # ---------------------------------------------------------------------------
 # Part 5 — Hotspot + sequence integration table
 # ---------------------------------------------------------------------------

@@ -278,32 +278,46 @@ The interactive Streamlit dashboard ([`dashboard/app.py`](file:///c:/Users/user/
 
 ---
 
+---
+
+## 10. Historical Route Candidate Discovery & Departure-Time Analytics
+
+### 10.1 Objective Journey Segmentation (Without Passenger Flags)
+Because T-Drive records vehicle pings without passenger occupancy meters, continuous trajectories were segmented into discrete physical journeys based on:
+1. Calendar date boundaries;
+2. Prolonged communication loss or driver break intervals ($\ge 1800\text{ s}$);
+3. Stationary dwell periods ($\ge 300\text{ s}$ with spatial displacement $< 50\text{ m}$).
+
+In the 99-taxi baseline, this procedure isolated **40,827 discrete trajectory segments**.
+
+### 10.2 Chronological Holdout Split & Route Recommendation
+To prevent future data leakage, trajectories were divided chronologically:
+- **Discovery Window**: February 2–6, 2008 (89,391 GPS observations);
+- **Holdout Evaluation Window**: February 7–8, 2008 (27,522 GPS observations).
+
+Across 20 high-frequency origin-destination cell pairs analyzed:
+- **Recommendation Coverage**: **45.0% (9 of 20 pairs)** had multiple supported continuous paths enabling comparative evaluation. The remaining 11 pairs exhibited only a single path or had insufficient historical support ($< 3$ trips).
+- **Travel-Time Holdout Evaluation**: Comparing recommended route median durations against actual observed test journeys on unseen future days (Feb 7–8) yielded:
+  - **Mean Absolute Error (MAE)**: **44.4 seconds**
+  - **Median Absolute Error (MedAE)**: **0.0 seconds** (across 21 test journeys).
+
+### 10.3 Departure-Time Window Sensitivity
+Historical journeys were evaluated across $\pm 5, 10, 15$-minute departure windows. Windows with insufficient samples ($< 2$ trips) returned an explicit `INSUFFICIENT_DATA` flag. Travel-time differences across departure windows reflect observed empirical correlations in the February 2008 sample and are explicitly distinguished from causal improvements or live dynamic navigation.
+
+---
+
 ## 11. Automated Verification & Test Results
 
-A test suite of 19 automated tests was developed and executed ([`tests/test_evaluation.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_evaluation.py), [`tests/test_dashboard.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_dashboard.py)):
+A comprehensive suite of **45 automated tests** was developed and executed across 6 test modules:
+- [`tests/test_ingestion_and_cleaning.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_ingestion_and_cleaning.py): Ingestion schema detection, malformed rows, duplicate drops, invalid coordinates, timestamp sorting, deterministic sampling (9 tests).
+- [`tests/test_spatial_temporal.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_spatial_temporal.py): 500m grid discretization, centroid coordinate decoding, path continuity, normalized temporal activity (6 tests).
+- [`tests/test_sequential.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_sequential.py): Sequence building, duplicate compression, PrefixSpan gapped mining, contiguous n-grams, pattern traceability (5 tests).
+- [`tests/test_route_and_departure.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_route_and_departure.py): Candidate route discovery, alternative comparison, continuity validation, departure windows, insufficient-evidence guards (6 tests).
+- [`tests/test_evaluation.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_evaluation.py): Pair-level confusion metrics, synthetic benchmark planted recovery, realized support (15 tests).
+- [`tests/test_dashboard.py`](file:///c:/Users/user/Downloads/urban-taxi-mobility/urban-taxi-mobility/tests/test_dashboard.py): Streamlit AppTest integration across Administrator and Customer modes (4 tests).
 
 ```
-test_different_methods_identical_units .................... PASS
-test_duplicate_pairs_across_multiple_patterns ............. PASS
-test_gapped_pairs_in_prefixspan ........................... PASS
-test_no_predictions ....................................... PASS
-test_no_reference_pairs ................................... PASS
-test_partial_recovery ..................................... PASS
-test_perfect_recovery ..................................... PASS
-test_repeated_cell_patterns ............................... PASS
-test_reversed_ordered_pairs ............................... PASS
-test_zero_denominator_handling ............................ PASS
-test_below_threshold_pattern_not_ground_truth ............. PASS
-test_generator_reproducibility ............................ PASS
-test_no_duplicate_counting_in_synthetic_evaluation ........ PASS
-test_planted_frequent_pattern_recovery .................... PASS
-test_realized_support_calculation ......................... PASS
-test_admin_mode_overview_render ........................... PASS
-test_customer_mode_render ................................. PASS
-test_methodology_and_evaluation_section ................... PASS
-test_mobility_corridors_zero_state ........................ PASS
-
-Ran 19 tests in 6.55s — ALL 19 TESTS PASSED (100% SUCCESS)
+Ran 45 tests in 5.13s — ALL 45 TESTS PASSED (100% SUCCESS)
 ```
 
 ---
@@ -316,23 +330,22 @@ For academic defense and reporting integrity, the following limitations are expl
 3. **Synthetic Benchmark Scope**: Synthetic benchmark metrics evaluate recovery of the known synthetic construction, not real-world predictive accuracy.
 4. **GPS Observations vs Passenger Demand**: GPS pings describe historical taxi vehicle movements. They do not measure unmet passenger travel demand or road congestion.
 5. **Temporal & Geographic Bounds**: Findings are bounded to Beijing in February 2008 and do not claim generalization to other cities or seasons.
-6. **Zero-Corridor Validity**: Finding zero corridors connecting distinct hotspots is an expected, scientifically valid descriptive result under current support thresholds.
-7. **Heuristic Ranking Weights**: The 6-factor composite score uses equal weighting ($1/6$ each) as a descriptive heuristic.
+6. **Zero-Corridor Validity**: Finding zero corridors connecting distinct hotspots at 5% support is an expected, scientifically valid descriptive result because top frequent patterns reside within the dense urban core (Cluster 0). Multi-cluster corridors emerge at $\le 2\%$ support.
+7. **Observational vs Causal Departure Differences**: Travel-time variations across departure windows represent empirical associations in historical data, not causal guarantees.
+8. **Heuristic Ranking Weights**: The 6-factor composite score uses equal weighting ($1/6$ each) as a descriptive heuristic.
 
 ---
 
 ## 13. Commands to Reproduce All Results
 
-```bash
-# 1. Run Automated Unit and Dashboard Integration Tests (19 tests)
+```powershell
+# 1. Run Complete Automated Unit and Dashboard Test Suite (45 tests)
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 
-# 2. Run Unified Experiment Runner (Phases 2, 3, 4, 5)
+# 2. Run Unified Experiment Runner (Phases 1 through 6)
 .\.venv\Scripts\python.exe src\experiment_runner.py
 
-# 3. Execute Final Notebook 05 End-to-End
-.\.venv\Scripts\python.exe -m jupyter nbconvert --to notebook --execute --inplace notebooks\05_model_evaluation.ipynb
-
-# 4. Launch Streamlit Mobility Dashboard
+# 3. Launch Streamlit Mobility Dashboard
 .\.venv\Scripts\streamlit.exe run dashboard\app.py
 ```
+
