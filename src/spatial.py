@@ -163,6 +163,90 @@ def cell_grid_summary(df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Scalar haversine distance in metres between two lat/lon points."""
+    r = EARTH_RADIUS_M
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+def build_cell_lookup(df_or_summary: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Build a lookup mapping each spatial_cell_id to its centroid lat/lon."""
+    if "centroid_lat" in df_or_summary.columns and "centroid_lon" in df_or_summary.columns:
+        summary = df_or_summary
+    else:
+        summary = cell_grid_summary(df_or_summary)
+
+    lookup = {}
+    for _, row in summary.iterrows():
+        lookup[str(row[COL_CELL_ID])] = {
+            "centroid_lat": float(row["centroid_lat"]),
+            "centroid_lon": float(row["centroid_lon"]),
+            "n_points": int(row["n_points"]) if "n_points" in row else 0,
+        }
+    return lookup
+
+
+def decode_cell(cell_id: str, cell_lookup: dict[str, dict[str, float]]) -> dict[str, float]:
+    """Retrieve geographic centroid coordinates for an anonymous spatial_cell_id."""
+    return cell_lookup.get(cell_id, {"centroid_lat": math.nan, "centroid_lon": math.nan, "n_points": 0})
+
+
+def are_cells_adjacent(
+    cell_a: str,
+    cell_b: str,
+    cell_lookup: dict[str, dict[str, float]],
+    max_dist_m: float = 1000.0,
+) -> bool:
+    """Check whether two spatial cells are geographic neighbors within max_dist_m."""
+    coord_a = decode_cell(cell_a, cell_lookup)
+    coord_b = decode_cell(cell_b, cell_lookup)
+    if math.isnan(coord_a["centroid_lat"]) or math.isnan(coord_b["centroid_lat"]):
+        return False
+    dist = haversine_m(
+        coord_a["centroid_lat"], coord_a["centroid_lon"], coord_b["centroid_lat"], coord_b["centroid_lon"]
+    )
+    return dist <= max_dist_m
+
+
+def verify_path_continuity(
+    cell_sequence: tuple[str, ...] | list[str],
+    cell_lookup: dict[str, dict[str, float]],
+    max_gap_m: float = 1000.0,
+) -> tuple[bool, list[float]]:
+    """Verify geographic adjacency and continuity for an ordered sequence of cells.
+
+    Returns (is_continuous, transition_distances_m). Prevents impossible jumps
+    between geographically disconnected cells from being treated as direct road routes.
+    """
+    if len(cell_sequence) < 2:
+        return True, []
+
+    distances = []
+    is_continuous = True
+    for i in range(len(cell_sequence) - 1):
+        ca, cb = cell_sequence[i], cell_sequence[i + 1]
+        coord_a = decode_cell(ca, cell_lookup)
+        coord_b = decode_cell(cb, cell_lookup)
+        if math.isnan(coord_a["centroid_lat"]) or math.isnan(coord_b["centroid_lat"]):
+            distances.append(math.nan)
+            is_continuous = False
+            continue
+        dist = haversine_m(
+            coord_a["centroid_lat"], coord_a["centroid_lon"], coord_b["centroid_lat"], coord_b["centroid_lon"]
+        )
+        distances.append(round(dist, 1))
+        if dist > max_gap_m:
+            is_continuous = False
+
+    return is_continuous, distances
+
+
+
 if __name__ == "__main__":
     # Quick manual sanity check with a tiny synthetic fixture (clearly
     # labelled as a test fixture, not real T-Drive data).

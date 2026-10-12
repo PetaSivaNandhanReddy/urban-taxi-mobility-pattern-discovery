@@ -165,7 +165,19 @@ RARE_TRANSITION_MAX_TAXI_DAYS = 2
 # ---------------------------------------------------------------------------
 # Grid cell sizes compared in the Part 9 research evaluation, alongside the
 # existing DBSCAN and support-threshold candidate lists above.
-GRID_SIZES_TO_COMPARE_METERS = [300.0, 500.0, 800.0]
+# ---------------------------------------------------------------------------
+# PHASE 5 — HISTORICAL ROUTE AND DEPARTURE-TIME ANALYTICS (src/route_candidates.py, recommendation.py, departure_optimizer.py)
+# ---------------------------------------------------------------------------
+# Dwell time (stationary or idle period in seconds) to consider a potential trip/session boundary
+TRIP_DWELL_TIME_THRESHOLD_SEC = 300.0  # 5 minutes
+# Maximum allowable time gap between consecutive points before splitting into a new trajectory segment
+TRIP_MAX_TIME_GAP_SEC = 1800.0  # 30 minutes
+# Minimum number of points required for a valid trajectory trip segment
+MIN_TRIP_POINTS = 3
+# Minimum supporting historical trips required to evaluate alternative routes or travel times
+MIN_ROUTE_EVIDENCE_TRIPS = 3
+# Default departure-time comparison intervals in minutes
+DEPARTURE_TIME_WINDOWS_MIN = [5, 10, 15]
 
 
 def ensure_output_dirs() -> None:
@@ -183,3 +195,4 @@ def ensure_output_dirs() -> None:
         RESULTS_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
+

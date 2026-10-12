@@ -42,11 +42,16 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 import clustering
 import config
 import data_loader as dl
+import departure_optimizer as do
 import pattern_evaluation as pe
 import preprocessing as pp
+import recommendation as rc
+import route_candidates as rcan
 import sequential
 import spatial
 import synthetic_benchmark as sb
+import trajectory as tr
+
 
 
 def run_synthetic_experiments(output_dir: Path) -> dict[str, Any]:
@@ -436,6 +441,130 @@ def run_sample_scaling(output_dir: Path) -> pd.DataFrame:
     return scaling_df
 
 
+def run_route_and_departure_analytics(
+    cleaned_df: pd.DataFrame,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Execute Phase 5: Historical Route Discovery, Recommendation, and Departure-Time Analytics."""
+    print("\n" + "=" * 70)
+    print("PHASE 5: HISTORICAL ROUTE, RECOMMENDATION, AND DEPARTURE ANALYTICS")
+    print("=" * 70)
+
+    # 1. Assign spatial cells
+    cell_df = spatial.assign_spatial_cells(cleaned_df, cell_size_meters=config.GRID_CELL_SIZE_METERS)
+    cell_lookup = spatial.build_cell_lookup(cell_df)
+
+    # 2. Segment trajectories into trips
+    segmented_df = tr.segment_trajectories(cell_df, max_gap_sec=1800.0, min_points=config.MIN_TRIP_POINTS)
+    n_trips = segmented_df["trip_id"].nunique()
+    print(f"Segmented trajectories into {n_trips:,} discrete trips/sessions.")
+
+    # 3. Chronological Train/Holdout Evaluation Split
+    # Discovery period: Feb 2 - Feb 6, 2008 (5 days)
+    # Holdout evaluation period: Feb 7 - Feb 8, 2008 (2 days)
+    train_df = segmented_df[segmented_df[config.COL_TIMESTAMP].dt.date <= pd.to_datetime("2008-02-06").date()].copy()
+    test_df = segmented_df[segmented_df[config.COL_TIMESTAMP].dt.date > pd.to_datetime("2008-02-06").date()].copy()
+    print(f"Chronological split: {len(train_df):,} discovery points (Feb 2-6), {len(test_df):,} holdout points (Feb 7-8).")
+
+    # 4. Discover frequent OD cell pairs on discovery data
+    frequent_ods = rcan.find_frequent_od_pairs(train_df, min_trips=3)
+    print(f"Discovered {len(frequent_ods)} OD cell pairs with >= 3 historical trips in discovery set.")
+
+    # 5. Evaluate Route Candidates & Recommendations across OD pairs
+    rec_rows = []
+    dep_rows = []
+    holdout_validation_rows = []
+
+    for _, od_row in frequent_ods.head(20).iterrows():
+        orig = od_row["origin_cell"]
+        dest = od_row["destination_cell"]
+
+        # Route discovery on training data
+        cand_result = rcan.discover_route_candidates(
+            train_df, orig, dest, min_evidence_trips=config.MIN_ROUTE_EVIDENCE_TRIPS, cell_lookup=cell_lookup
+        )
+        rec_report = rc.compare_route_alternatives(cand_result, min_evidence_trips=config.MIN_ROUTE_EVIDENCE_TRIPS)
+
+        rec_rows.append({
+            "origin_cell": orig,
+            "destination_cell": dest,
+            "discovery_trips": od_row["trip_count"],
+            "status": rec_report["status"],
+            "has_recommendation": rec_report["has_recommendation"],
+            "recommended_path": rec_report["recommended_route"]["path_str"] if rec_report["recommended_route"] else None,
+            "recommended_median_duration_sec": rec_report["recommended_route"]["median_duration_sec"] if rec_report["recommended_route"] else None,
+            "n_alternatives": len(rec_report["alternative_routes"]),
+            "duration_advantage_sec": rec_report["duration_advantage_sec"],
+        })
+
+        # Departure-time window evaluation
+        if not cand_result["raw_journeys"].empty:
+            sample_time = cand_result["raw_journeys"].iloc[0]["origin_time"]
+            dep_report = do.evaluate_departure_windows(
+                cand_result["raw_journeys"],
+                target_departure_time=sample_time,
+                min_trips_per_window=2,
+            )
+            if dep_report["status"] == "SUFFICIENT_DATA" and dep_report["best_historical_window"]:
+                bw = dep_report["best_historical_window"]
+                dep_rows.append({
+                    "origin_cell": orig,
+                    "destination_cell": dest,
+                    "target_time": str(sample_time),
+                    "base_window_median_sec": dep_report["base_window_median_sec"],
+                    "best_window_center": bw["window_center_time"],
+                    "best_window_shift_min": bw["shift_minutes"],
+                    "best_window_median_sec": bw["median_duration_sec"],
+                    "observed_diff_sec": bw["diff_vs_base_sec"],
+                })
+
+        # Chronological Holdout Validation:
+        test_journeys = rcan.find_od_journeys(test_df, orig, dest)
+        if test_journeys and rec_report["recommended_route"]:
+            rec_path = rec_report["recommended_route"]["cell_path"]
+            matching_test_journeys = [j for j in test_journeys if j["cell_path"] == rec_path]
+            for tj in matching_test_journeys:
+                observed_dur = tj["duration_sec"]
+                predicted_med = rec_report["recommended_route"]["median_duration_sec"]
+                ae = abs(observed_dur - predicted_med)
+                holdout_validation_rows.append({
+                    "origin_cell": orig,
+                    "destination_cell": dest,
+                    "test_trip_id": tj["trip_id"],
+                    "test_origin_time": str(tj["origin_time"]),
+                    "predicted_median_sec": predicted_med,
+                    "observed_test_duration_sec": observed_dur,
+                    "absolute_error_sec": ae,
+                    "percentage_error": round(100 * ae / observed_dur, 2) if observed_dur > 0 else 0,
+                })
+
+    rec_df = pd.DataFrame(rec_rows)
+    dep_df = pd.DataFrame(dep_rows)
+    holdout_df = pd.DataFrame(holdout_validation_rows)
+
+    # Coverage metrics
+    total_queries = len(rec_df)
+    n_recommended = int(rec_df["has_recommendation"].sum()) if not rec_df.empty else 0
+    coverage_pct = round(100 * n_recommended / total_queries, 2) if total_queries > 0 else 0.0
+
+    rec_df.to_csv(output_dir / "route_recommendation_evaluation.csv", index=False)
+    dep_df.to_csv(output_dir / "departure_window_evaluation.csv", index=False)
+    holdout_df.to_csv(output_dir / "chronological_holdout_validation.csv", index=False)
+
+    print(f"\n[Route Recommendation Coverage]: Evaluated {total_queries} OD pairs -> {n_recommended} recommended ({coverage_pct}% coverage).")
+    if not holdout_df.empty:
+        mae = holdout_df["absolute_error_sec"].mean()
+        med_ae = holdout_df["absolute_error_sec"].median()
+        print(f"[Chronological Holdout Validation on Unseen Future Days (Feb 7-8)]: MAE = {mae:.1f}s, Median AE = {med_ae:.1f}s across {len(holdout_df)} test journeys.")
+
+    return {
+        "rec_df": rec_df,
+        "dep_df": dep_df,
+        "holdout_df": holdout_df,
+        "coverage_pct": coverage_pct,
+    }
+
+
 def main():
     print("=" * 80)
     print("URBAN TAXI MOBILITY: UNIFIED EXPERIMENT RUNNER")
@@ -471,7 +600,10 @@ def main():
         output_dir,
     )
 
-    # 5. Run Phase 5 Nested Sample Scaling
+    # 5. Run Phase 5 Historical Route and Departure-Time Analytics
+    route_dep_results = run_route_and_departure_analytics(cleaned_df, output_dir)
+
+    # 6. Run Phase 5 Nested Sample Scaling
     scaling_df = run_sample_scaling(output_dir)
 
     print("\n" + "=" * 80)
@@ -481,3 +613,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

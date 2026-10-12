@@ -78,6 +78,7 @@ def build_taxi_sequences(
     df: pd.DataFrame,
     segment_by: str | None = None,
     split_by_date: bool = True,
+    group_by_trip: bool = False,
 ) -> dict[str, list[str]]:
     """
     Build ordered, consecutive-duplicate-compressed cell sequences.
@@ -85,6 +86,9 @@ def build_taxi_sequences(
     By default, one sequence is built per taxi per calendar day. This avoids
     artificial transitions between the final observation of one day and the
     first observation of another day.
+
+    If group_by_trip=True and 'trip_id' is present in df, sequences are built
+    at the discrete trip/session level.
 
     Parameters
     ----------
@@ -96,7 +100,10 @@ def build_taxi_sequences(
 
     split_by_date : bool
         If True, build taxi-day sequences. This should remain True for
-        movement analysis.
+        movement analysis unless group_by_trip=True.
+
+    group_by_trip : bool
+        If True and 'trip_id' in df, groups sequences by individual trips.
 
     Returns
     -------
@@ -106,6 +113,7 @@ def build_taxi_sequences(
         taxi_id::date
         taxi_id::date::time_segment
         taxi_id::date::day_type
+        trip_id (when group_by_trip=True)
 
     Sequences shorter than two cells are excluded because they contain no
     movement transition.
@@ -131,10 +139,12 @@ def build_taxi_sequences(
     work_df = df.copy()
     work_df["_sequence_date"] = work_df[COL_TIMESTAMP].dt.date
 
-    group_columns = [COL_TAXI_ID]
-
-    if split_by_date:
-        group_columns.append("_sequence_date")
+    if group_by_trip and "trip_id" in work_df.columns:
+        group_columns = ["trip_id"]
+    else:
+        group_columns = [COL_TAXI_ID]
+        if split_by_date:
+            group_columns.append("_sequence_date")
 
     if segment_by is not None:
         group_columns.append(segment_by)
@@ -159,6 +169,69 @@ def build_taxi_sequences(
         sequences[sequence_key] = compressed_sequence
 
     return sequences
+
+
+def is_subsequence_in_sequence(pattern: tuple[str, ...], sequence: list[str]) -> bool:
+    """Check if pattern appears in sequence in order (gaps allowed)."""
+    it = iter(sequence)
+    return all(item in it for item in pattern)
+
+
+def trace_pattern_occurrences(
+    pattern: tuple[str, ...] | list[str],
+    sequences: dict[str, list[str]],
+    is_contiguous: bool = False,
+) -> list[str]:
+    """Find all sequence keys that contain the given pattern.
+
+    Ensures that mined patterns can be traced back directly to the trajectories
+    that support them.
+    """
+    pattern_t = tuple(pattern)
+    matched_keys = []
+    for seq_key, seq in sequences.items():
+        if is_contiguous:
+            k = len(pattern_t)
+            match = any(tuple(seq[i : i + k]) == pattern_t for i in range(len(seq) - k + 1))
+        else:
+            match = is_subsequence_in_sequence(pattern_t, seq)
+        if match:
+            matched_keys.append(seq_key)
+    return matched_keys
+
+
+def evaluate_pattern_length_support(
+    sequences: dict[str, list[str]],
+    lengths: list[int] = [2, 3, 4, 5, 6, 8, 10],
+    min_support: float = 0.05,
+) -> pd.DataFrame:
+    """Investigate whether longer patterns (e.g. 5-10 locations) are supported by observed data.
+
+    Directly verifies whether longer routes recur across multiple taxis or if support
+    drops to zero as length grows.
+    """
+    results = []
+    for length in lengths:
+        try:
+            pats = mine_patterns(sequences, min_support=min_support, max_pattern_length=length)
+            at_exact_length = pats[pats["pattern_length"] == length] if len(pats) > 0 else pd.DataFrame()
+            results.append({
+                "target_length": length,
+                "min_support_pct": min_support * 100,
+                "n_patterns_at_length": len(at_exact_length),
+                "max_support_pct": float(at_exact_length["support_percentage"].max()) if len(at_exact_length) > 0 else 0.0,
+                "is_supported": len(at_exact_length) > 0,
+            })
+        except ValueError:
+            results.append({
+                "target_length": length,
+                "min_support_pct": min_support * 100,
+                "n_patterns_at_length": 0,
+                "max_support_pct": 0.0,
+                "is_supported": False,
+            })
+    return pd.DataFrame(results)
+
 
 
 def _empty_patterns(

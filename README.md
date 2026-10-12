@@ -74,20 +74,29 @@ urban-taxi-mobility/
 │   ├── anomaly.py                           # Rare / unusual transition identification
 │   ├── clustering.py                        # Haversine DBSCAN & k-distance elbow analysis
 │   ├── config.py                            # Central configuration module
-│   ├── data_loader.py                       # Recursive raw data loader with schema detection
+│   ├── data_loader.py                       # Recursive raw data loader with schema detection & metadata
+│   ├── departure_optimizer.py               # Historical departure-time window evaluation & correlation reporting
 │   ├── evaluation.py                        # Grid, DBSCAN & support threshold sensitivity
+│   ├── experiment_runner.py                 # Automated reproducible pipeline runner
 │   ├── integration.py                       # Sequential patterns + DBSCAN hotspot corridor mapping
 │   ├── pattern_evaluation.py                # Pair-level & pattern-level evaluation and metrics
 │   ├── pattern_ranking.py                   # Enriched sequence building & composite scoring
 │   ├── planning.py                          # Transportation planning insights & KPI generation
 │   ├── preprocessing.py                     # Multi-stage cleaning pipeline with CleaningReport
+│   ├── recommendation.py                    # Evidence-based alternative-route comparison & recommendation
+│   ├── route_candidates.py                  # Historical candidate route discovery & travel-time distributions
 │   ├── sequential.py                        # Sequence building & PrefixSpan / n-gram mining
-│   ├── spatial.py                           # Equi-rectangular spatial grid & compression
+│   ├── spatial.py                           # Equi-rectangular spatial grid, coordinate decoding & path continuity
 │   ├── synthetic_benchmark.py               # Objective synthetic benchmark with planted ground truth
-│   ├── temporal.py                          # Hourly & time-segment activity profiling
-│   └── trajectory.py                        # Trajectory reconstruction & speed jump diagnostics
+│   ├── temporal.py                          # Hourly, segment, date & normalized day-type activity profiling
+│   └── trajectory.py                        # Trajectory reconstruction & dwell-based trip/session segmentation
 └── tests/
-    └── test_evaluation.py                   # Automated test suite for evaluation methodology
+    ├── test_dashboard.py                    # Streamlit dashboard AppTest integration tests
+    ├── test_evaluation.py                   # Automated test suite for evaluation methodology
+    ├── test_ingestion_and_cleaning.py       # Ingestion, cleaning, coordinate validity & sampling tests
+    ├── test_route_and_departure.py          # Route candidates, recommendation & departure optimization tests
+    ├── test_sequential.py                   # Calendar sequences, duplicate compression & PrefixSpan tests
+    └── test_spatial_temporal.py             # Spatial grid, decoding, continuity & normalized temporal tests
 ```
 
 ---
@@ -224,11 +233,21 @@ Tested against 5 deliberately planted patterns with controlled noise in 350 gene
 
 *Key Scaling Takeaway*: A constant relative support threshold (5%) increases in absolute stringency as the fleet grows (requiring 160 distinct taxi-days for 497 taxis vs 32 for 99 taxis).
 
+### 7.5 Historical Route Candidate Discovery & Departure-Time Analytics
+
+Phase 5 introduces an evidence-based routing layer that segments trajectories into discrete trips/sessions based on physical dwell periods ($\ge 300\text{s}$) and signal gaps ($\ge 1800\text{s}$), discovering candidate paths without fabricating passenger status:
+- **Trajectory Segmentation**: 40,827 discrete trip segments identified in the 99-taxi baseline.
+- **Chronological Train/Holdout Split**: Discovery on Feb 2-6, 2008 (89,391 points) vs Holdout Evaluation on Feb 7-8, 2008 (27,522 points), strictly preventing future observation leakage.
+- **Route Recommendation Coverage**: Across 20 popular OD cell pairs evaluated, **9 pairs (45.0% coverage)** possessed multiple supported continuous paths enabling comparative recommendation. The remaining 11 pairs exhibited a single observed path or fell below the minimum evidence threshold ($\ge 3$ trips).
+- **Chronological Holdout Validation**: Evaluating recommended route durations against actual observed journeys on unseen future days (Feb 7-8) yielded a Mean Absolute Error of **44.4 seconds** (Median Absolute Error: **0.0 seconds**) across 21 test journeys.
+- **Departure-Time Window Evaluation**: Evaluated travel-time variations across $\pm 5, 10, 15$-minute windows. Windows with insufficient sample sizes ($< 2$ trips) return an explicit `INSUFFICIENT_DATA` flag.
+- **Methodological Guardrails**: Differences reflect observational historical associations in the February 2008 sample, explicitly distinguished from causal improvements or live traffic navigation.
+
 ---
 
 ## 8. Running Automated Unit & Dashboard Tests
 
-Run the complete 19-test automated test suite:
+Run the complete 45-test automated test suite across all 6 test modules:
 
 ```powershell
 python -m unittest discover -s tests
@@ -236,13 +255,22 @@ python -m unittest discover -s tests
 
 Expected output:
 ```
-Ran 19 tests in 6.55s — ALL 19 TESTS PASSED (100% SUCCESS)
+Ran 45 tests in 5.1s — ALL 45 TESTS PASSED (100% SUCCESS)
 ```
 
-To run all experiments end-to-end:
+Test modules covered:
+1. `tests/test_ingestion_and_cleaning.py`: Malformed records, duplicates, invalid coordinates, timestamp sorting, deterministic sampling.
+2. `tests/test_spatial_temporal.py`: 500m grid discretization, centroid coordinate decoding, path continuity, normalized temporal activity.
+3. `tests/test_sequential.py`: Sequence building, duplicate compression, PrefixSpan gapped mining, contiguous n-grams, traceability.
+4. `tests/test_route_and_departure.py`: Route discovery, recommendation logic, continuity checks, departure windows, insufficient-evidence guards.
+5. `tests/test_evaluation.py`: Pair-level evaluation, confusion counts, synthetic benchmark recovery, realized support.
+6. `tests/test_dashboard.py`: Streamlit AppTest integration tests across Administrator and Customer modes.
+
+To run the complete automated research experiment pipeline end-to-end:
 ```powershell
 python src/experiment_runner.py
 ```
+
 
 To launch the Streamlit Mobility Intelligence Dashboard:
 ```powershell

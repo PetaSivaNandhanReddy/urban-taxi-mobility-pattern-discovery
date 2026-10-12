@@ -167,13 +167,38 @@ def _load_single_taxi_file(path: Path, delimiter: str, has_header: bool) -> pd.D
     return df
 
 
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class IngestionMetadata:
+    """Detailed metadata recording data ingestion statistics and timing."""
+    total_files_discovered: int = 0
+    files_attempted: int = 0
+    files_loaded: int = 0
+    files_failed: int = 0
+    total_rows_loaded: int = 0
+    duration_seconds: float = 0.0
+    selected_taxi_ids: list[str] = field(default_factory=list)
+    failed_files: list[tuple[str, str]] = field(default_factory=list)
+
+    def summary(self) -> str:
+        return (
+            f"Ingestion Summary: {self.files_loaded:,} files loaded ({self.total_rows_loaded:,} rows) "
+            f"in {self.duration_seconds:.2f}s. Failed: {self.files_failed}."
+        )
+
+
 def load_tdrive_sample(
     raw_dir: Path = TDRIVE_RAW_DIR,
     n_taxis: Optional[int] = SAMPLE_TAXI_COUNT,
     max_rows: Optional[int] = SAMPLE_ROW_COUNT,
     seed: int = RANDOM_SEED,
+    taxi_ids: Optional[list[str]] = None,
+    return_metadata: bool = False,
     verbose: bool = True,
-) -> pd.DataFrame:
+) -> pd.DataFrame | tuple[pd.DataFrame, IngestionMetadata]:
     """Load a configurable sample of the T-Drive dataset.
 
     Parameters
@@ -189,12 +214,16 @@ def load_tdrive_sample(
         None means no cap.
     seed : int
         Random seed for taxi sampling, for reproducibility.
+    taxi_ids : list[str] or None
+        Optional explicit list of taxi IDs to load. Overrides n_taxis if provided.
+    return_metadata : bool
+        If True, returns a tuple of (df, IngestionMetadata). Default is False.
     verbose : bool
         Print progress information.
 
     Returns
     -------
-    pd.DataFrame
+    pd.DataFrame or tuple[pd.DataFrame, IngestionMetadata]
         Standardized columns: taxi_id (str), timestamp (str, unparsed —
         parsing happens in preprocessing.py), lon (float), lat (float).
 
@@ -203,15 +232,20 @@ def load_tdrive_sample(
     DataLoadError
         If no files are found or none could be parsed successfully.
     """
+    start_time = time.time()
     all_files = find_taxi_files(raw_dir)
     total_available = len(all_files)
 
-    rng = random.Random(seed)
-    if n_taxis is not None and n_taxis < total_available:
-        files_to_load = rng.sample(all_files, n_taxis)
-        files_to_load.sort(key=lambda p: int(p.stem))
+    if taxi_ids is not None:
+        target_ids = set(map(str, taxi_ids))
+        files_to_load = [p for p in all_files if p.stem in target_ids]
     else:
-        files_to_load = all_files
+        rng = random.Random(seed)
+        if n_taxis is not None and n_taxis < total_available:
+            files_to_load = rng.sample(all_files, n_taxis)
+            files_to_load.sort(key=lambda p: int(p.stem))
+        else:
+            files_to_load = all_files
 
     if verbose:
         print(
@@ -257,14 +291,28 @@ def load_tdrive_sample(
     if max_rows is not None and len(combined) > max_rows:
         combined = combined.iloc[:max_rows].copy()
 
+    elapsed = time.time() - start_time
+    metadata = IngestionMetadata(
+        total_files_discovered=total_available,
+        files_attempted=len(files_to_load),
+        files_loaded=len(frames),
+        files_failed=len(failed_files),
+        total_rows_loaded=len(combined),
+        duration_seconds=round(elapsed, 3),
+        selected_taxi_ids=[p.stem for p in files_to_load[:len(frames)]],
+        failed_files=failed_files,
+    )
+
     if verbose:
         print(
-            f"Loaded {len(combined):,} rows from {len(frames):,} taxi file(s). "
+            f"Loaded {len(combined):,} rows from {len(frames):,} taxi file(s) in {elapsed:.2f}s. "
             f"{len(failed_files)} file(s) failed to parse."
         )
         if failed_files:
             print(f"Failed files (showing up to 5): {failed_files[:5]}")
 
+    if return_metadata:
+        return combined, metadata
     return combined
 
 

@@ -37,25 +37,39 @@ from config import (
 )
 
 
+import time
+
+
 @dataclass
 class CleaningReport:
-    """Tracks record counts through every cleaning stage for transparency."""
+    """Tracks record counts, exclusions, and timings through every cleaning stage."""
 
     stage_counts: dict = field(default_factory=dict)
+    stage_durations: dict = field(default_factory=dict)
+    exclusions: dict = field(default_factory=dict)
+    total_duration_sec: float = 0.0
 
-    def record(self, stage_name: str, n_rows: int) -> None:
+    def record(self, stage_name: str, n_rows: int, duration_sec: float = 0.0) -> None:
         self.stage_counts[stage_name] = n_rows
+        if duration_sec > 0:
+            self.stage_durations[stage_name] = round(duration_sec, 4)
+
+    def record_exclusion(self, reason: str, count: int) -> None:
+        self.exclusions[reason] = count
 
     def summary(self) -> str:
         lines = ["Data Cleaning Summary", "=" * 40]
         prev = None
         for stage, count in self.stage_counts.items():
+            duration_str = f" ({self.stage_durations.get(stage, 0):.3f}s)" if stage in self.stage_durations else ""
             if prev is None:
-                lines.append(f"{stage}: {count:,}")
+                lines.append(f"{stage}: {count:,}{duration_str}")
             else:
                 removed = prev - count
-                lines.append(f"{stage}: {count:,}  (removed {removed:,})")
+                lines.append(f"{stage}: {count:,}  (removed {removed:,}){duration_str}")
             prev = count
+        if self.total_duration_sec > 0:
+            lines.append(f"Total Cleaning Duration: {self.total_duration_sec:.2f}s")
         return "\n".join(lines)
 
     def as_dataframe(self) -> pd.DataFrame:
@@ -63,9 +77,16 @@ class CleaningReport:
         prev = None
         for stage, count in self.stage_counts.items():
             removed = 0 if prev is None else prev - count
-            rows.append({"stage": stage, "records_remaining": count, "records_removed": removed})
+            dur = self.stage_durations.get(stage, 0.0)
+            rows.append({
+                "stage": stage,
+                "records_remaining": count,
+                "records_removed": removed,
+                "stage_duration_sec": dur,
+            })
             prev = count
         return pd.DataFrame(rows)
+
 
 
 def clean_taxi_id(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
@@ -170,17 +191,35 @@ def run_cleaning_pipeline(
 
     This is the single entry point notebooks/scripts should call.
     """
+    total_t0 = time.time()
     report = CleaningReport()
     report.record("Original records", len(raw_df))
 
+    t0 = time.time()
     df = clean_taxi_id(raw_df, report)
-    df = clean_timestamps(df, report)
-    df = clean_coordinates(df, report)
-    df = flag_out_of_region(df, report, drop_out_of_region=drop_out_of_region)
-    df = clean_duplicates(df, report)
+    report.record("After taxi_id cleaning", len(df), duration_sec=time.time() - t0)
 
+    t0 = time.time()
+    df = clean_timestamps(df, report)
+    report.record("After timestamp cleaning", len(df), duration_sec=time.time() - t0)
+
+    t0 = time.time()
+    df = clean_coordinates(df, report)
+    report.record("After coordinate validity cleaning", len(df), duration_sec=time.time() - t0)
+
+    t0 = time.time()
+    df = flag_out_of_region(df, report, drop_out_of_region=drop_out_of_region)
+    out_of_reg_stage = "After out-of-region removal" if drop_out_of_region else "After out-of-region flagging (none dropped)"
+    report.record(out_of_reg_stage, len(df), duration_sec=time.time() - t0)
+
+    t0 = time.time()
+    df = clean_duplicates(df, report)
+    report.record("After duplicate removal", len(df), duration_sec=time.time() - t0)
+
+    t0 = time.time()
     df = df.sort_values([COL_TAXI_ID, COL_TIMESTAMP]).reset_index(drop=True)
-    report.record("Final records", len(df))
+    report.total_duration_sec = round(time.time() - total_t0, 3)
+    report.record("Final records", len(df), duration_sec=time.time() - t0)
 
     if verbose:
         print("\n" + report.summary())
