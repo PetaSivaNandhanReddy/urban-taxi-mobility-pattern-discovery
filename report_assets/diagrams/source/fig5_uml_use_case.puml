@@ -1,0 +1,65 @@
+@startuml
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam dpi 300
+
+title Urban Taxi Mobility Analytics System - Use Case Model
+
+left to right direction
+
+actor "Fleet Operations Analyst" as Analyst
+actor "Urban Transit Planner" as Planner
+actor "Commuter / Field User" as Commuter
+
+rectangle "Urban Taxi Mobility Discovery Platform" {
+    package "Data & Spatial Processing" {
+        usecase "UC1: Ingest & Preprocess Trajectories" as UC1
+        usecase "UC2: Inspect Cleaning & Data Attrition" as UC2
+        usecase "UC3: Run Haversine DBSCAN Hotspots" as UC3
+        usecase "UC4: Calibrate Spatial Grid & Epsilon" as UC4
+    }
+
+    package "Pattern Discovery & Optimization" {
+        usecase "UC5: Mine Sequential Patterns via PrefixSpan" as UC5
+        usecase "UC6: Extract Direct Adjacent Transitions" as UC6
+        usecase "UC7: Chronological Holdout Validation" as UC7
+        usecase "UC8: Rank Corridors via Multi-Factor Index" as UC8
+    }
+
+    package "Downstream Decision Support" {
+        usecase "UC9: Analyze Hourly & Diurnal Temporal Profiles" as UC9
+        usecase "UC10: Query Origin-Destination Travel Times" as UC10
+        usecase "UC11: Optimize Departure Windows for Relocation" as UC11
+        usecase "UC12: Explore Interactive Folium Corridor Maps" as UC12
+    }
+}
+
+' Analyst Links
+Analyst --> UC1
+Analyst --> UC2
+Analyst --> UC3
+Analyst --> UC4
+Analyst --> UC7
+
+' Planner Links
+Planner --> UC3
+Planner --> UC5
+Planner --> UC6
+Planner --> UC8
+Planner --> UC9
+Planner --> UC11
+Planner --> UC12
+
+' Commuter Links
+Commuter --> UC10
+Commuter --> UC11
+Commuter --> UC12
+
+UC5 .> UC8 : <<includes>>
+UC1 .> UC2 : <<includes>>
+UC3 .> UC4 : <<extends>>
+UC7 .> UC5 : <<includes>>
+
+@enduml

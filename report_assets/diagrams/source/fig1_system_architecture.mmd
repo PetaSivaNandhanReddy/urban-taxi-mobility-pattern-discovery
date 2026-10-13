@@ -1,0 +1,47 @@
+flowchart LR
+    subgraph S1 ["1. Data Ingestion & Preprocessing"]
+        direction TB
+        D1["Raw T-Drive GPS Logs<br/>10,357 Taxi Files (Beijing)"] --> P1["data_loader.py<br/>Streaming Log Parser"]
+        P1 --> P2["preprocessing.py<br/>Multi-Stage Cleaning"]
+        P2 --> P3["trajectory.py<br/>Velocity Anomaly Purging"]
+    end
+
+    subgraph S2 ["2. Spatial & Temporal Representation"]
+        direction TB
+        S2_A["spatial.py<br/>500m Equirectangular Grid<br/>5,413 Cell Vocabulary"]
+        S2_B["clustering.py<br/>Haversine DBSCAN<br/>eps=300m, min_pts=15<br/>237 Hotspots"]
+        S2_C["temporal.py<br/>Taxi-Day Segmentation<br/>630 Sequences (taxi::date)"]
+    end
+
+    subgraph S3 ["3. Sequential Pattern Mining"]
+        direction TB
+        M1["sequential.py<br/>Direct Contiguous n-gram<br/>1-Hop Physical Adjacency"]
+        M2["sequential.py<br/>PrefixSpan Engine<br/>Gapped Subsequences (L<=4)"]
+        M3["pattern_ranking.py<br/>Multi-Factor Composite Score<br/>Support + Fleet + Day"]
+    end
+
+    subgraph S4 ["4. Verification & Benchmarking"]
+        direction TB
+        E1["pattern_evaluation.py<br/>Common Pair Unit (u -> v)<br/>TP, FP, FN, P, R, F1"]
+        E2["Empirical Reference<br/>(35 Observed Pairs)"]
+        E3["synthetic_benchmark.py<br/>(13 Planted Pairs, 100% Rec)"]
+        E4["optimization_study.py<br/>Chronological Holdout<br/>(Train, Val, Test)"]
+    end
+
+    subgraph S5 ["5. Operational Delivery"]
+        direction TB
+        O1["planning.py & route_candidates.py<br/>Corridor Travel Times & Dispatch"]
+        O2["dashboard/app.py<br/>Streamlit UI & Folium Maps"]
+        O3["report_assets/<br/>IEEE Tables, Figures & Manifests"]
+    end
+
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+
+    style S1 fill:#eef2ff,stroke:#6366f1,stroke-width:2px
+    style S2 fill:#f0fdf4,stroke:#22c55e,stroke-width:2px
+    style S3 fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style S4 fill:#fef2f2,stroke:#ef4444,stroke-width:2px
+    style S5 fill:#f8fafc,stroke:#64748b,stroke-width:2px

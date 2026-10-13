@@ -1,0 +1,12 @@
+Metric_Name,Symbol,Mathematical_Formulation,Evaluation_Unit,Operational_Constraints_and_Zero_Handling
+True Positives,TP,|P_pred intersect R_ref|,Deduplicated Directed Transitions (u -> v),"Number of predicted directed cell pairs (u != v) that match reference transitions; duplicate pairs within multi-step sequences counted once"
+False Positives,FP,|P_pred \ R_ref|,Deduplicated Directed Transitions (u -> v),"Number of predicted directed transitions not present in reference transitions; penalizes unobserved multi-hop corridors or noisy transitions"
+False Negatives,FN,|R_ref \ P_pred|,Deduplicated Directed Transitions (u -> v),Number of benchmark reference transitions missed by mined pattern set
+Pair Precision,P,TP / (TP + FP),Ratio in [0.0, 1.0],Fraction of predicted transitions that match reference; returns 0.0 if TP + FP == 0
+Pair Recall,R,TP / (TP + FN),Ratio in [0.0, 1.0],Fraction of reference transitions recovered by mined patterns; returns 0.0 if TP + FN == 0
+Pair F1-Score,F1,2 * P * R / (P + R),Harmonic mean in [0.0, 1.0],Balanced harmonic measure between precision and recall; returns 0.0 if P + R == 0
+Relative F1 Improvement,Delta_F1,(F1_tuned - F1_baseline) / F1_baseline * 100%,Percentage,Relative gain over default baseline parameterization; requires F1_baseline > 0
+Planted Pattern Recovery,Pattern_R,|K_recovered| / |K_planted|,Whole Planted Sequence (e.g. A->B->C->D),Fraction of synthetic ground-truth sequences discovered; evaluated at pattern level
+Empirical Reference Support,s_ref,count(u -> v in adjacent) / N_seq,Adjacent Consecutive Pair,Empirical reference support threshold (>= 1.5% in real T-Drive, yielding 35 reference pairs)
+Validation Holdout Period,T_val,Feb 6 2008 (Day 5),Chronological Taxi-Day Sequences,Parameter selection period isolated from training (Feb 2-5) and test (Feb 7-8)
+Untouched Test Period,T_test,Feb 7-8 2008 (Days 6-7),Chronological Taxi-Day Sequences,Strictly unseen future evaluation period; zero parameter tuning permitted

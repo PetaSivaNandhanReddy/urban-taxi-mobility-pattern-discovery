@@ -1,0 +1,82 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam dpi 300
+skinparam sequenceMessageAlign center
+
+title Urban Taxi Mobility Analytics - Function-Based Execution Sequence
+
+actor "User / Analyst" as User
+participant "Streamlit Dashboard\n(dashboard/app.py)" as App
+participant "Experiment Runner\n(experiment_runner.py)" as Runner
+participant "Preprocessing\n(preprocessing.py)" as Prep
+participant "Spatial Engine\n(spatial.py / clustering.py)" as Spatial
+participant "Sequential Miner\n(sequential.py)" as Miner
+participant "Evaluation Engine\n(pattern_evaluation.py)" as Eval
+participant "Departure Optimizer\n(departure_optimizer.py)" as Opt
+database "Local File System\n(outputs/ & report_assets/)" as Storage
+
+== 1. Pipeline Execution & Ingestion ==
+User -> Runner : execute_full_pipeline(sample_size=100)
+activate Runner
+
+Runner -> Prep : load_and_clean_taxi_data(raw_dir)
+activate Prep
+Prep -> Prep : purge_invalid_coordinates()\nflag_out_of_region()\ndeduplicate_timestamps()
+Prep --> Runner : clean_df (116,913 records, 99 taxis)
+deactivate Prep
+
+== 2. Spatial & Sequential Processing ==
+Runner -> Spatial : assign_grid_cells(clean_df, cell_size=500m)
+activate Spatial
+Spatial --> Runner : grid_df (5,413 active cells)
+deactivate Spatial
+
+Runner -> Spatial : run_dbscan(clean_df, eps=300m, min_samples=15)
+activate Spatial
+Spatial --> Runner : clusters_df (237 spatial hotspots)
+deactivate Spatial
+
+Runner -> Miner : build_daily_sequences(grid_df)
+activate Miner
+Miner --> Runner : sequences (630 daily sequences)
+deactivate Miner
+
+Runner -> Miner : run_prefixspan(sequences, min_support=0.05)
+activate Miner
+Miner --> Runner : prefixspan_patterns (22 frequent sequences)
+deactivate Miner
+
+Runner -> Miner : mine_direct_transitions(sequences, min_support=0.05)
+activate Miner
+Miner --> Runner : direct_transitions (2 baseline patterns)
+deactivate Miner
+
+== 3. Evaluation & Validation ==
+Runner -> Eval : evaluate_patterns_against_reference(patterns, reference)
+activate Eval
+Eval -> Eval : extract_directed_pairs(patterns)\ncompute_tp_fp_fn()\ncalculate_precision_recall_f1()
+Eval --> Runner : metrics_dict (P=0.5500, R=0.3143, F1=0.4000)
+deactivate Eval
+
+Runner -> Storage : persist_results(outputs/tables/, outputs/results/)
+deactivate Runner
+
+== 4. Interactive Analytics & Downstream Planning ==
+User -> App : launch_dashboard()
+activate App
+App -> Storage : load_cached_results()
+Storage --> App : tables, metrics, hotspots
+
+User -> App : select_corridor_and_target_arrival(origin, destination, target_hour)
+App -> Opt : recommend_departure_window(origin, destination, target_arrival)
+activate Opt
+Opt -> Opt : extract_historical_travel_times()\ncompute_percentiles(p10, p50, p90)
+Opt --> App : recommendation (recommended_departure, buffer_minutes, confidence)
+deactivate Opt
+
+App --> User : render_interactive_folium_map_and_metrics()
+deactivate App
+
+@enduml

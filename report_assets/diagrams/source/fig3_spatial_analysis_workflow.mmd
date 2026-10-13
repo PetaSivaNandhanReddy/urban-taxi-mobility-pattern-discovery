@@ -1,0 +1,33 @@
+flowchart LR
+    GPSInput(["Clean Trajectory Base<br/>116,913 Verified Points<br/>(lat, lon, timestamp)"]) --> Fork[Spatiotemporal Pipeline]
+
+    subgraph GridBranch ["Branch A: Spatial Discretization (spatial.py)"]
+        direction TB
+        GridProj["Equirectangular Planar Projection<br/>Cell Size: R = 500 meters"] --> CellAssign["Assign Token: CELL_XXXXX<br/>Row/Col indexing via floor division"]
+        CellAssign --> CellSummary["Active Vocabulary Summary<br/>5,413 Cells Occupied<br/>Compute Cell Centroids & Densities"]
+    end
+
+    subgraph ClusterBranch ["Branch B: Hotspot Clustering (clustering.py)"]
+        direction TB
+        RadianConv["Coordinate Radian Conversion<br/>phi, lambda in radians"] --> DistMatrix["Pairwise Haversine Matrix<br/>search radius eps_rad = 300m / R_earth"]
+        DistMatrix --> DBSCANRun["Haversine DBSCAN Execution<br/>eps = 300 m, min_samples = 15"]
+        DBSCANRun --> ClusterLabels["237 Core Hotspot Clusters<br/>Noise Point Isolation"]
+    end
+
+    Fork --> GridBranch
+    Fork --> ClusterBranch
+
+    subgraph IntegrationNode ["Spatial Integration & Deliverables"]
+        direction TB
+        MapInt["Hotspot-to-Grid Integration<br/>Map DBSCAN Hotspots to Cell Vocabulary"]
+        Outputs["Spatial Deliverables<br/>- spatial_grid_summary.csv<br/>- cluster_summary.csv<br/>- spatial_clusters.csv<br/>- Interactive Folium Maps"]
+        MapInt --> Outputs
+    end
+
+    GridBranch --> IntegrationNode
+    ClusterBranch --> IntegrationNode
+
+    style GPSInput fill:#f1f5f9,stroke:#475569,stroke-width:2px
+    style GridBranch fill:#eff6ff,stroke:#3b82f6,stroke-width:2px
+    style ClusterBranch fill:#f0fdf4,stroke:#22c55e,stroke-width:2px
+    style IntegrationNode fill:#faf5ff,stroke:#a855f7,stroke-width:2px
