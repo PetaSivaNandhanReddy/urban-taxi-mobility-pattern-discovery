@@ -623,6 +623,97 @@ def pairwise_jaccard_table(pattern_sets: dict[str, set]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# ---------------------------------------------------------------------------
+# CHRONOLOGICAL EVALUATION PARTITIONING
+# ---------------------------------------------------------------------------
+
+def split_chronological_data(
+    df: pd.DataFrame,
+    timestamp_col: str = "timestamp",
+    n_train_days: int = 4,
+    n_val_days: int = 1,
+    n_test_days: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split trajectory data into strictly chronological, non-overlapping partitions by calendar date.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Trajectory DataFrame containing a timestamp column.
+    timestamp_col : str
+        Column name containing timestamps.
+    n_train_days : int
+        Number of initial calendar days for training / discovery.
+    n_val_days : int
+        Number of subsequent calendar days for validation / hyperparameter selection.
+    n_test_days : int | None
+        Number of subsequent calendar days for future test / holdout recurrence.
+        If None, all remaining days after validation are assigned to the test partition.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        (train_df, val_df, test_df)
+
+    Raises
+    ------
+    ValueError
+        If df is empty, timestamp_col is missing, timestamps cannot be parsed,
+        or insufficient distinct dates exist to populate all partitions non-emptily.
+    """
+    if df is None or len(df) == 0:
+        raise ValueError("Input DataFrame is empty; cannot partition chronological data.")
+
+    if timestamp_col not in df.columns:
+        raise ValueError(f"Timestamp column '{timestamp_col}' not found in DataFrame.")
+
+    if n_train_days < 1 or n_val_days < 1 or (n_test_days is not None and n_test_days < 1):
+        raise ValueError("Partition day counts must be at least 1.")
+
+    ts_series = pd.to_datetime(df[timestamp_col], errors="coerce")
+    valid_mask = ts_series.notna()
+    if not valid_mask.any():
+        raise ValueError("No valid timestamps found to extract calendar dates.")
+
+    valid_dates = sorted(ts_series[valid_mask].dt.date.unique())
+    min_required = n_train_days + n_val_days + (n_test_days if n_test_days is not None else 1)
+    if len(valid_dates) < min_required:
+        raise ValueError(
+            f"Insufficient dates for chronological partition: found {len(valid_dates)} dates, "
+            f"need at least {min_required} (train={n_train_days}, val={n_val_days}, "
+            f"test>={1 if n_test_days is None else n_test_days})."
+        )
+
+    train_dates = valid_dates[:n_train_days]
+    val_dates = valid_dates[n_train_days : n_train_days + n_val_days]
+    if n_test_days is None:
+        test_dates = valid_dates[n_train_days + n_val_days :]
+    else:
+        test_dates = valid_dates[n_train_days + n_val_days : n_train_days + n_val_days + n_test_days]
+
+    # Validate strict chronological ordering and non-overlapping isolation
+    if not (max(train_dates) < min(val_dates) and max(val_dates) < min(test_dates)):
+        raise ValueError("Partition dates violated strict chronological precedence.")
+
+    if set(train_dates) & set(val_dates) or set(val_dates) & set(test_dates) or set(train_dates) & set(test_dates):
+        raise ValueError("Partition dates overlap; chronological isolation violated.")
+
+    # Slice partitions
+    train_mask = ts_series.dt.date.isin(train_dates)
+    val_mask = ts_series.dt.date.isin(val_dates)
+    test_mask = ts_series.dt.date.isin(test_dates)
+
+    train_df = df[train_mask].copy()
+    val_df = df[val_mask].copy()
+    test_df = df[test_mask].copy()
+
+    if len(train_df) == 0 or len(val_df) == 0 or len(test_df) == 0:
+        raise ValueError("One or more chronological partitions resulted in empty data.")
+
+    return train_df, val_df, test_df
+
+
 if __name__ == "__main__":
     print("Running self-check for pattern_evaluation.py...")
     fixture_sequences = {

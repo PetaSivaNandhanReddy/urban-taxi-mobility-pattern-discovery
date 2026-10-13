@@ -92,8 +92,18 @@ class CleaningReport:
 def clean_taxi_id(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
     """Remove rows with missing/empty taxi_id."""
     df = df.copy()
-    df[COL_TAXI_ID] = df[COL_TAXI_ID].astype(str).str.strip()
-    df = df[(df[COL_TAXI_ID].notna()) & (df[COL_TAXI_ID] != "") & (df[COL_TAXI_ID] != "nan")]
+    # Normalize taxi IDs by trimming whitespace
+    taxi_ids = df[COL_TAXI_ID].astype(str).str.strip()
+    # Treat empty strings and original missing values as missing
+    taxi_ids = taxi_ids.mask(df[COL_TAXI_ID].isna() | (taxi_ids == ""), pd.NA)
+    df[COL_TAXI_ID] = taxi_ids
+
+    # Filter invalid IDs
+    df = df[
+        df[COL_TAXI_ID].notna()
+        & (~df[COL_TAXI_ID].str.lower().isin(["nan", "none", "null", "<na>"]))
+    ]
+    df[COL_TAXI_ID] = df[COL_TAXI_ID].astype(str)
     report.record("After taxi_id cleaning", len(df))
     return df
 

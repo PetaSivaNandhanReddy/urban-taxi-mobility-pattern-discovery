@@ -38,6 +38,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 import pandas as pd
 # pyrefly: ignore [missing-import]
 import pattern_evaluation as pe
+# pyrefly: ignore [missing-import]
 import synthetic_benchmark as sb
 
 
@@ -239,6 +240,92 @@ class TestRealDataEvaluationMetrics(unittest.TestCase):
         self.assertEqual(m1["recall"], 0.0)
         self.assertEqual(m1["f1"], 0.0)
 
+    def test_directionality_asymmetry_penalty(self):
+        """Test that bidirectional prediction for asymmetric reference incurs precision penalty."""
+        # Reference has only A -> B, not B -> A
+        ref_directed = {("CELL_A", "CELL_B")}
+        # Direction-blind model predicts both (A, B) and (B, A)
+        cooc_df = pd.DataFrame({"pattern": [("CELL_A", "CELL_B")]})
+        cooc_pairs = pe.extract_ordered_pairs_from_cooccurrence(cooc_df)
+        counts = pe.confusion_counts_pair_level(cooc_pairs, ref_directed)
+        metrics = pe.precision_recall_f1(counts, zero_division=0.0)
+
+        self.assertEqual(counts["TP"], 1)
+        self.assertEqual(counts["FP"], 1)  # (CELL_B, CELL_A) is a FP
+        self.assertEqual(counts["FN"], 0)
+        self.assertEqual(metrics["precision"], 0.5)
+        self.assertEqual(metrics["recall"], 1.0)
+        self.assertAlmostEqual(metrics["f1"], 2 * 0.5 * 1.0 / (0.5 + 1.0), places=4)
+
+    def test_chronological_split_strict_isolation_and_ordering(self):
+        """Test chronological split guarantees non-overlapping, strictly preceding date partitions."""
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2008-02-02 08:00:00", periods=7, freq="D"),
+            "taxi_id": ["1"] * 7,
+            "spatial_cell_id": [f"CELL_{i}" for i in range(7)],
+        })
+        train_df, val_df, test_df = pe.split_chronological_data(
+            df, timestamp_col="timestamp", n_train_days=4, n_val_days=1, n_test_days=2
+        )
+
+        train_dates = set(train_df["timestamp"].dt.date)
+        val_dates = set(val_df["timestamp"].dt.date)
+        test_dates = set(test_df["timestamp"].dt.date)
+
+        # Non-overlapping partitions
+        self.assertEqual(len(train_dates & val_dates), 0)
+        self.assertEqual(len(val_dates & test_dates), 0)
+        self.assertEqual(len(train_dates & test_dates), 0)
+
+        # Strictly ordered
+        self.assertTrue(max(train_dates) < min(val_dates))
+        self.assertTrue(max(val_dates) < min(test_dates))
+
+        # Expected counts
+        self.assertEqual(len(train_dates), 4)
+        self.assertEqual(len(val_dates), 1)
+        self.assertEqual(len(test_dates), 2)
+
+    def test_chronological_split_insufficient_dates(self):
+        """Test that insufficient calendar dates raise clear ValueError."""
+        # Only 4 days available, but 4 train + 1 val + 1 test = 6 days needed
+        short_df = pd.DataFrame({
+            "timestamp": pd.date_range("2008-02-02 08:00:00", periods=4, freq="D"),
+            "spatial_cell_id": ["C1", "C2", "C3", "C4"],
+        })
+        with self.assertRaises(ValueError) as ctx:
+            pe.split_chronological_data(short_df, timestamp_col="timestamp", n_train_days=4, n_val_days=1)
+        self.assertIn("Insufficient dates", str(ctx.exception))
+
+    def test_chronological_split_empty_and_missing_handling(self):
+        """Test error handling for empty df, missing column, or unparseable timestamps."""
+        empty_df = pd.DataFrame()
+        with self.assertRaises(ValueError):
+            pe.split_chronological_data(empty_df, timestamp_col="timestamp")
+
+        missing_col_df = pd.DataFrame({"other_col": [1, 2, 3]})
+        with self.assertRaises(ValueError) as ctx:
+            pe.split_chronological_data(missing_col_df, timestamp_col="timestamp")
+        self.assertIn("Timestamp column", str(ctx.exception))
+
+        nat_df = pd.DataFrame({"timestamp": ["invalid-date", None, "not-a-date"]})
+        with self.assertRaises(ValueError) as ctx:
+            pe.split_chronological_data(nat_df, timestamp_col="timestamp")
+        self.assertIn("No valid timestamps", str(ctx.exception))
+
+    def test_chronological_split_shuffled_timestamps(self):
+        """Test that chronological split correctly sorts shuffled rows by date."""
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2008-02-02 08:00:00", periods=7, freq="D"),
+            "value": list(range(7)),
+        }).sample(frac=1.0, random_state=42).reset_index(drop=True)
+
+        train_df, val_df, test_df = pe.split_chronological_data(
+            df, timestamp_col="timestamp", n_train_days=4, n_val_days=1
+        )
+        self.assertTrue(max(train_df["timestamp"].dt.date) < min(val_df["timestamp"].dt.date))
+        self.assertTrue(max(val_df["timestamp"].dt.date) < min(test_df["timestamp"].dt.date))
+
 
 class TestSyntheticBenchmark(unittest.TestCase):
     """Test suite verifying synthetic benchmark reproducibility and realized support calculation."""
@@ -324,7 +411,7 @@ def run_all_tests():
     result = runner.run(suite)
     if not result.wasSuccessful():
         raise RuntimeError("One or more automated evaluation tests failed!")
-    print("\nALL 15 EVALUATION & SYNTHETIC BENCHMARK TESTS PASSED SUCCESSFULLY!")
+    print(f"\nALL {result.testsRun} EVALUATION & SYNTHETIC BENCHMARK TESTS PASSED SUCCESSFULLY!")
 
 
 if __name__ == "__main__":
