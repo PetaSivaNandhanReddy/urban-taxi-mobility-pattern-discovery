@@ -1,0 +1,8 @@
+Stage,Records_Remaining,Records_Removed,Percentage_Removed,Fleet_Taxis_Active,Stage_Description
+Raw Trajectory Logs Ingested,129545,0,0.00%,100,Raw T-Drive taxi logs covering Beijing (Feb 2–8 2008) across 100 sampled driver files
+Taxi Identifier Validation,129545,0,0.00%,100,Verified integer identifier formatting and non-empty log streams
+Timestamp Validation & Sorting,129545,0,0.00%,100,Parsed ISO-8601 timestamps and sorted chronologically per taxi
+Coordinate Validity Purging,128800,745,0.58%,99,Purged 745 unphysical coordinates (311 null 0.0/0.0 fixes from taxi 4375 and 434 latitude/longitude out-of-range fixes)
+Geographic Boundary Flagging,128800,0,0.00%,99,"Flagged 332 records outside Beijing bounding box [39.4, 41.6] N, [115.7, 117.4] E; non-destructive retention"
+Duplicate Timestamp Purging,116913,11887,9.18%,99,Purged exact concurrent duplicate GPS fixes per vehicle
+Final Analytical Trajectory Base,116913,0,0.00%,99,Total 12632 records removed (9.75% cumulative filtering rate); 630 valid calendar-day sequences

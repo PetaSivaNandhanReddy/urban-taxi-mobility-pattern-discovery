@@ -1,0 +1,9 @@
+Benchmark_Evaluation,Mining_Method,Configuration_Setting,Predicted_Units,Reference_Units,TP,FP,FN,Precision,Recall,F1_Score,Operational_Notes
+Real T-Drive (Empirical Reference),Direct Adjacent Transition,Baseline (min_support=5.0% len=2),2,35,2,0,33,1.0000,0.0571,0.1081,Severely under-recalled due to overly strict 5% support threshold
+Real T-Drive (Empirical Reference),Direct Adjacent Transition,Exploratory Peak F1 (min_support=2.0% len=2),33,35,27,6,8,0.8182,0.7714,0.7941,Exploratory reference agreement; F1 improves by +634.6% relative gain
+Real T-Drive (Empirical Reference),PrefixSpan (Gapped Sequential),Baseline (min_support=5.0% len=4),20,35,11,9,24,0.5500,0.3143,0.4000,FPs reflect valid multi-hop corridors uncaptured by 1-hop reference
+Real T-Drive (Empirical Reference),PrefixSpan (Gapped Sequential),Ranked Top-5 Composite (min_support=5.0% len=4),4,35,3,1,32,0.7500,0.0857,0.1538,Precision improves +36.4% via multi-taxi and multi-day persistence filter
+Synthetic Planted Benchmark,PrefixSpan (Pair-Level),Baseline (min_support=10.0% len=4),58,13,13,45,0,0.2241,1.0000,0.3662,100% recall of planted transitions; noise fragments dilute precision
+Synthetic Planted Benchmark,PrefixSpan (Pair-Level),Tuned Support (min_support=13.0% len=4),23,13,13,10,0,0.5652,1.0000,0.7222,F1 improves +97.2% relative gain while maintaining 100% planted recall
+Synthetic Planted Benchmark,PrefixSpan (Pattern-Level),Baseline (min_support=10.0% len=4),68,4,4,64,0,0.0588,1.0000,0.1111,Pattern-level exact match across mined sub-patterns
+Synthetic Planted Benchmark,PrefixSpan (Pattern-Level),Tuned Support (min_support=13.0% len=4),30,4,4,26,0,0.1333,1.0000,0.2353,F1 improves +111.8% relative gain while maintaining 100% planted corridor recovery

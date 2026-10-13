@@ -1,0 +1,15 @@
+Module_Component,Algorithm_Method,Parameter_Name,Configured_Value,Evaluation_Operational_Role
+Spatial Discretization,Planar Equirectangular Grid,cell_size_meters,500 m,Discretizes continuous GPS fixes into categorical cell vocabulary (CELL_XXXXX)
+Spatial Discretization,Planar Equirectangular Grid,beijing_bounding_box,"[39.4, 41.6] N, [115.7, 117.4] E",Spatial operational domain covering greater Beijing metropolitan region
+Spatial Clustering,Haversine DBSCAN,eps_meters,300 m,Neighborhood search radius converted to radians (eps / 6371008.8 m)
+Spatial Clustering,Haversine DBSCAN,min_samples,15,Minimum core point density required to establish an urban spatial hotspot
+Trajectory Segmentation,Calendar-Day Splitting,split_key,taxi_id::date,Partitions continuous driver trajectories across midnight boundaries (630 sequences)
+Trajectory Segmentation,Run-Length Compression,consecutive_dedup,True,Compresses immediate dwell times within identical cells: A-A-B -> A-B
+Sequential Pattern Mining,PrefixSpan,min_support_pct,5.0% (32 sequences),Support threshold for mining frequent gapped subsequences
+Sequential Pattern Mining,PrefixSpan,max_pattern_length,4,Maximum item sequence depth mined in prefix-projected databases
+Sequential Pattern Mining,Direct Contiguous n-gram,min_support_pct,5.0% (baseline) / 2.0% (tuned),Support threshold for mining strictly adjacent 1-hop physical transitions
+Sequential Pattern Mining,Direct Contiguous n-gram,n_gram_order,2,Bigram window size extracting consecutive cell-to-cell traversals
+Pattern Ranking,Composite Multi-Factor,weight_support,0.4,Weight assigned to normalized sequence frequency in composite mobility index
+Pattern Ranking,Composite Multi-Factor,weight_taxi_spread,0.3,Weight assigned to fleet-wide driver participation ratio
+Pattern Ranking,Composite Multi-Factor,weight_day_spread,0.3,Weight assigned to temporal persistence across distinct calendar days
+Evaluation Engine,Pair-Level Alignment,evaluation_unit,Directed Transition (u -> v),Canonical directed pair representation (u != v) for unified evaluation

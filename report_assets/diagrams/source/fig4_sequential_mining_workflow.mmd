@@ -1,0 +1,40 @@
+flowchart LR
+    TokenStream(["Cell Token Stream<br/>116,913 Observations"]) --> TaxiDaySplit["Taxi-Day Split (temporal.py)<br/>taxi_id::date (630 Sequences)"]
+    TaxiDaySplit --> RunLength["Run-Length Deduplication<br/>A -> A -> B becomes A -> B"]
+
+    subgraph MiningEngines ["Sequential Mining Engines (sequential.py)"]
+        direction TB
+        subgraph Contiguous ["1-Hop Physical Adjacency"]
+            Bigram["Direct Bigrams (n=2)<br/>Strictly consecutive"]
+            FilterAdj["Min Support Filter<br/>Baseline: 5% (2 patterns)<br/>Tuned: 2% (33 patterns)"]
+            Bigram --> FilterAdj
+        end
+        subgraph PrefixSpanMining ["Gapped Subsequences (Depth <= 4)"]
+            PrefixProject["PrefixSpan Mining<br/>Recursive projection"]
+            Ranking["Composite Multi-Factor Ranking<br/>Score = 0.4*Supp + 0.3*Taxi + 0.3*Day"]
+            PrefixProject --> Ranking
+        end
+    end
+
+    RunLength --> Contiguous
+    RunLength --> PrefixSpanMining
+
+    subgraph EvalFramework ["Unified Evaluation (pattern_evaluation.py)"]
+        direction TB
+        PairExtract["Pair-Level Canonical Mapping<br/>Extract ordered pairs (u -> v, u != v)"]
+        BenchEmpirical["Empirical Reference<br/>35 Observed Transitions"]
+        BenchSynthetic["Synthetic Benchmark<br/>13 Planted Corridors (100% Rec)"]
+        BenchHoldout["Chronological Holdout<br/>Train: Feb 2-5 | Val: Feb 6 | Test: Feb 7-8"]
+        PairExtract --> BenchEmpirical
+        PairExtract --> BenchSynthetic
+        PairExtract --> BenchHoldout
+    end
+
+    FilterAdj --> PairExtract
+    Ranking --> PairExtract
+
+    style TokenStream fill:#f1f5f9,stroke:#475569,stroke-width:2px
+    style MiningEngines fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style Contiguous fill:#eff6ff,stroke:#3b82f6,stroke-width:1px
+    style PrefixSpanMining fill:#fef3c7,stroke:#d97706,stroke-width:1px
+    style EvalFramework fill:#fee2e2,stroke:#ef4444,stroke-width:2px

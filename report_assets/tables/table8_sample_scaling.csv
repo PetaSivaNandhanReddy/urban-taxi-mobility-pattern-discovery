@@ -1,0 +1,4 @@
+Fleet_Cohort,Requested_Taxis,Processed_Taxis,Dropped_Taxis,Raw_GPS_Points,Clean_GPS_Points,Purged_Points_Pct,Taxi_Day_Sequences,Occupied_Cells_500m,Min_Support_Count,Patterns_Mined,Empirical_Reference_Pairs,Ref_TP,Ref_FP,Ref_FN,Precision,Recall,F1_Score,Pipeline_Runtime_Sec
+Baseline Sample,100,99,1,129545,116913,9.75%,630,5413,32,22,35,11,9,24,0.5500,0.3143,0.4000,0.97 s
+Medium Sample,250,249,1,408044,371399,8.98%,1592,8923,80,46,1002,33,9,969,0.7857,0.0329,0.0632,3.96 s
+Large Sample,500,497,3,907479,833316,8.17%,3185,12373,160,43,3186,33,5,3153,0.8684,0.0104,0.0205,8.19 s

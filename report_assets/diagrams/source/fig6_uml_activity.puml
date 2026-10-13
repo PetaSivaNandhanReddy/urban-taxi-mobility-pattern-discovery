@@ -1,0 +1,71 @@
+@startuml
+skinparam activityShape roundBox
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam dpi 300
+
+title Urban Taxi Mobility Analytics - End-to-End Activity Workflow
+
+start
+
+:Stream Raw T-Drive GPS Trajectory Logs;
+note right: data_loader.py\n100 Taxi Files (129,545 records)
+
+partition "Data Cleaning & Validation" {
+    :Validate Taxi IDs & Timestamps;
+    :Purge Coordinate Anomalies;
+    note right: Drops 745 unphysical fixes\nPurges Taxi 4375 (311 null fixes)
+    :Flag Geographic Bounding Box Outliers;
+    note right: 332 points flagged (in_region=False)\nRetained without data loss
+    :Deduplicate Concurrent Temporal Fixes;
+    note right: Drops 11,887 exact duplicates
+    :Reconstruct Trajectories & Validate Velocity;
+}
+
+partition "Spatial Discretization & Clustering" {
+    :Project GPS Fixes into 500m Equirectangular Grid Cells;
+    note right: 5,413 unique occupied cells assigned
+    :Compute Pairwise Haversine Distances in Radians;
+    :Execute DBSCAN Clustering (eps=300m, min_samples=15);
+    :Extract 237 Urban Hotspot Centroids & Isolates;
+}
+
+partition "Temporal Segmentation & Sequential Mining" {
+    :Partition Trajectories into Taxi-Day Sequences (taxi_id::date);
+    note right: 630 Daily Driver Sequences
+    :Compress Immediate Same-Cell Run-Length Dwells;
+    fork
+        :Mine 1-Hop Direct Contiguous Transitions (n=2);
+    fork again
+        :Mine Multi-Hop Gapped Subsequences via PrefixSpan (len<=4);
+    end fork
+    :Compute Multi-Factor Pattern Ranking Scores;
+}
+
+partition "Experimental Evaluation & Validation" {
+    fork
+        :Evaluate against Empirical Reference Benchmark;
+        note right: 35 Observed Adjacent Transitions\nPair-level TP, FP, FN, P, R, F1
+    fork again
+        :Execute Synthetic Ground-Truth Benchmark;
+        note right: Seed=42, 350 Sequences, 5 Planted Patterns\n100% Recovery Verification
+    fork again
+        :Partition Chronological Validation Sets;
+        note right: Train: Feb 2-5 (364 seqs)\nVal: Feb 6 (90 seqs, 39 ref pairs)\nTest: Feb 7-8 (176 seqs, 22 ref pairs)
+        :Tune Support on Validation Day (Feb 6);
+        :Evaluate Generalization on Untouched Test (Feb 7-8);
+    end fork
+}
+
+partition "Corridor Analytics & Visualization" {
+    :Compute Route Median Durations & Travel-Time Variances;
+    :Calculate Optimal Relocation Departure Windows;
+    :Export Summary Tables, Benchmark Results & Manifests;
+    :Render Interactive Folium Spatial Maps & Streamlit Dashboard;
+}
+
+stop
+
+@enduml

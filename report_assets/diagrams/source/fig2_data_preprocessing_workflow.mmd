@@ -1,0 +1,32 @@
+flowchart LR
+    subgraph Phase1 ["Phase 1: Ingestion & Integrity"]
+        direction TB
+        Raw(["Raw T-Drive Logs<br/>100 Taxis, 129,545 Pts"]) --> Parse["Parse Columns & Dates<br/>taxi_id, time, lon, lat"]
+        Parse --> Sort["Chronological Sort<br/>Ascending by Timestamp"]
+    end
+
+    subgraph Phase2 ["Phase 2: Spatial & Temporal Cleaning"]
+        direction TB
+        PurgeCoords["Purge 745 Unphysical Fixes<br/>- 311 null fixes (Taxi 4375 dropped)<br/>- 434 out-of-range coords<br/>128,800 records (99 taxis)"]
+        FlagRegion["Flag 332 Out-of-BBox Points<br/>[39.4, 41.6] N, [115.7, 117.4] E<br/>in_region=False (retained)"]
+        Dedup["Purge 11,887 Duplicates<br/>Concurrent identical fixes"]
+        PurgeCoords --> FlagRegion --> Dedup
+    end
+
+    subgraph Phase3 ["Phase 3: Trajectory Validation"]
+        direction TB
+        Reconstruct["Reconstruct Segments<br/>Compute dt, ds, velocity"]
+        SpeedCheck{"Speed Check<br/>v <= 150 km/h"}
+        CleanBase(["Clean Trajectory Base<br/>116,913 Fixes, 99 Taxis<br/>630 Calendar-Days"])
+        Reconstruct --> SpeedCheck -->|Plausible| CleanBase
+        SpeedCheck -.->|Jump Anomaly| FlagJump["Flag Anomaly"] -.-> CleanBase
+    end
+
+    Phase1 --> Phase2 --> Phase3
+
+    style Phase1 fill:#f1f5f9,stroke:#475569,stroke-width:2px
+    style Phase2 fill:#fef3c7,stroke:#d97706,stroke-width:2px
+    style Phase3 fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    style PurgeCoords fill:#fee2e2,stroke:#ef4444,stroke-width:1px
+    style Dedup fill:#fee2e2,stroke:#ef4444,stroke-width:1px
+    style CleanBase fill:#bbf7d0,stroke:#15803d,stroke-width:2px
