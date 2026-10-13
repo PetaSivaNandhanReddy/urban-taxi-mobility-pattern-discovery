@@ -92,6 +92,22 @@ class TestDataIngestionAndQuality(unittest.TestCase):
         self.assertEqual(len(clean_df), 1)
         self.assertEqual(clean_df.iloc[0][config.COL_TAXI_ID], "10")
 
+    def test_taxi_id_cleaning_edge_cases(self):
+        """Test clean_taxi_id edge cases: missing values, empty strings, whitespace, string representations, and stripping."""
+        edge_id_df = pd.DataFrame({
+            config.COL_TAXI_ID: [
+                None, float("nan"), pd.NA, "", "   ",
+                "nan", "NAN", "none", "None", "null", "NULL", "<NA>", "<na>",
+                "  101  ", 102, "taxi_42"
+            ],
+            config.COL_TIMESTAMP: ["2008-02-02 12:00:00"] * 16,
+            config.COL_LON: [116.40] * 16,
+            config.COL_LAT: [39.90] * 16,
+        })
+        clean_df, report = pp.run_cleaning_pipeline(edge_id_df, verbose=False)
+        self.assertEqual(len(clean_df), 3)
+        self.assertEqual(clean_df[config.COL_TAXI_ID].tolist(), ["101", "102", "taxi_42"])
+
     def test_chronological_ordering_guarantee(self):
         """Observations must be sorted strictly chronologically within each taxi."""
         unshuffled = pd.DataFrame({
